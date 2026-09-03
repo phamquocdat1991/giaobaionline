@@ -131,3 +131,45 @@ svg { stroke-width: 1.9; }
 @media (max-width: 800px) { .topbar { min-height: 62px; padding-inline: 14px; }.brand strong { font-size: 17px; }.brand small, .realtime { display: none; }.primary-nav { margin-left: auto; }.primary-nav button { padding: 0 10px; font-size: 0; }.primary-nav button svg { width: 20px; height: 20px; }.builder-page, .manager-page { width: min(100% - 20px, 680px); padding-top: 20px; }.page-heading { align-items: flex-start; }.page-heading p { line-height: 1.5; }.api-status { display: none; }.builder-grid { grid-template-columns: 1fr; }.workspace-card { min-height: 520px; }.questions-list { max-height: none; }.empty-state { min-height: 440px; }.share-settings, .share-methods, .student-info, .class-form { grid-template-columns: 1fr; }.stat-grid.five, .stat-grid.four { grid-template-columns: repeat(2,1fr); }.monitor-toolbar { align-items: stretch; flex-direction: column; }.toolbar-filters { display: grid; grid-template-columns: 1fr 1fr; }.toolbar-actions { width: 100%; }.toolbar-actions button { flex: 1; }.subtabs { overflow-x: auto; }.copy-pending { margin-left: 0; }.saved-classes > div { grid-template-columns: 1fr 1fr; }.quiz-banner { min-height: 130px; padding: 22px; }.quiz-banner > svg { right: -20px; }.student-container { width: min(100% - 20px,680px); }.student-topbar { padding-inline: 12px; }.student-brand strong { font-size: 12px; }.student-brand small { display: none; } }
 @media (max-width: 520px) { .compact-heading h1, .manager-heading h1 { font-size: 24px; }.form-grid.three { grid-template-columns: 1fr 1fr; }.form-grid.three > :last-child { grid-column: 1 / -1; }.bloom-list { grid-template-columns: 1fr; }.workspace-header { align-items: flex-start; flex-direction: column; }.workspace-header button { width: 100%; }.empty-steps { display: none; }.share-summary { flex-direction: column; }.share-summary > span { align-self: flex-start; }.stat-grid.five, .stat-grid.four { grid-template-columns: 1fr; }.toolbar-filters { grid-template-columns: 1fr; }.saved-classes > div { grid-template-columns: 1fr; }.manager-tabs [data-slot="tabs-content"] { padding: 12px; }.guide-strip { display: none; }.student-info { padding: 15px; }.quiz-banner h1 { font-size: 23px; }.student-question { padding: 15px; }.result-details { gap: 13px; font-size: 13px; }.recorded { border-radius: 10px; }.submit-bar { bottom: 8px; padding-left: 14px; }.submit-bar button { min-width: 125px; }.big-score strong { font-size: 49px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+
+/* ── Login Page ──────────────────────────────────── */
+.login-bg { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at 60% 0%, #e0e5ff 0%, transparent 55%), linear-gradient(180deg, #f5f6ff 0%, #eff0fb 100%); }
+.login-card { width: min(480px, 100%); padding: 36px 32px 28px; background: white; border: 1px solid #e0e4f2; border-radius: 22px; box-shadow: 0 20px 60px rgba(35,50,130,.10); display: grid; gap: 0; }
+.login-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; color: #fff; }
+.login-logo > svg { width: 50px; height: 50px; padding: 10px; background: linear-gradient(135deg, #3458e8, #7c3aed); border-radius: 14px; box-shadow: 0 8px 20px rgba(80,70,210,.28); }
+.login-logo div { display: grid; }
+.login-logo strong { font-size: 22px; letter-spacing: -.5px; color: #1a2544; }
+.login-logo small { font-size: 9px; letter-spacing: 2px; font-weight: 800; color: #7a81a0; }
+.login-eyebrow { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: #f0ecff; color: #6a44d4; border-radius: 999px; font-size: 12px; font-weight: 800; width: fit-content; margin-bottom: 12px; }
+.login-title { margin: 0 0 8px; color: #17213d; font-size: clamp(22px, 5vw, 30px); letter-spacing: -.7px; line-height: 1.2; }
+.login-desc { margin: 0 0 22px; color: #636c84; font-size: 14px; line-height: 1.6; }
+.login-tabs { display: flex; gap: 4px; padding: 4px; background: #f0f2fa; border-radius: 12px; margin-bottom: 20px; }
+.login-tabs button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; border: 0; border-radius: 9px; background: none; color: #6a7288; font-size: 13px; font-weight: 750; transition: .18s ease; }
+.login-tabs button.active { background: white; color: #374be0; box-shadow: 0 1px 8px rgba(40,55,180,.12); }
+.login-form { display: grid; gap: 10px; margin-bottom: 22px; }
+.login-field-label { display: flex; align-items: center; gap: 6px; color: #4a5270; font-size: 13px; font-weight: 750; }
+.login-input { min-height: 46px; font-size: 15px; }
+.login-submit { min-height: 48px; background: linear-gradient(90deg, #3560e8, #7040da); font-size: 15px; font-weight: 800; gap: 8px; }
+.login-google-section { display: grid; gap: 14px; margin-bottom: 22px; }
+.google-signin-btn { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 52px; border: 1.5px solid #e0e4ef; border-radius: 12px; background: white; color: #3c4260; font-size: 16px; font-weight: 750; cursor: pointer; transition: .18s ease; box-shadow: 0 2px 10px rgba(30,40,90,.07); }
+.google-signin-btn:hover:not(:disabled) { border-color: #a0adef; background: #fafbff; box-shadow: 0 4px 18px rgba(30,40,90,.12); }
+.google-signin-btn:disabled { opacity: .65; cursor: not-allowed; }
+.g-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, #ea4335 0%, #fbbc04 40%, #34a853 70%, #4285f4 100%); color: white; font-size: 11px; font-weight: 900; }
+.g-icon-lg { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #ea4335 0%, #fbbc04 40%, #34a853 70%, #4285f4 100%); color: white; font-size: 14px; font-weight: 900; }
+.login-google-note { margin: 0; color: #757d95; font-size: 12.5px; text-align: center; line-height: 1.55; }
+.login-features { display: grid; gap: 11px; padding: 16px; background: #f7f8fe; border: 1px solid #e5e8f3; border-radius: 13px; margin-bottom: 18px; }
+.login-features > div { display: flex; align-items: center; gap: 10px; color: #4e5670; font-size: 13px; }
+.login-features > div > svg { color: #5c71df; flex: 0 0 auto; }
+.login-student-note { margin: 0; text-align: center; color: #848da5; font-size: 12px; line-height: 1.6; }
+.logout-btn { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid #e2e5ef; border-radius: 9px; background: white; color: #697089; cursor: pointer; transition: .18s; }
+.logout-btn:hover { background: #fff0f4; border-color: #f4c5d0; color: #c03058; }
+
+/* ── Multi-file Dropzone ─────────────────────────── */
+.dropzone-area { display: grid; gap: 8px; }
+.file-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.file-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; padding: 5px 8px; background: #eff1ff; border: 1px solid #d8dcf5; border-radius: 8px; color: #3d51c8; font-size: 11px; font-weight: 700; }
+.file-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip button { display: grid; place-items: center; width: 16px; height: 16px; border: 0; border-radius: 50%; background: rgba(61,81,200,.15); color: #3d51c8; cursor: pointer; flex: 0 0 auto; padding: 0; }
+.file-chip button:hover { background: #df315f; color: white; }
+.dropzone.dragging { border-color: #4a67e6; background: #edf0ff; color: #3248c5; box-shadow: 0 0 0 3px rgba(74,103,230,.15); }
+
