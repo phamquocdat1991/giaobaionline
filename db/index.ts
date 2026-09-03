@@ -80,9 +80,7 @@ export async function getDb(): Promise<any> {
   }
   const [{ createClient }, { drizzle }] = await Promise.all([import("@libsql/client"), import("drizzle-orm/libsql")]);
   const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
-  if (url.startsWith("file:")) {
-    await initLocalTables(client);
-  }
+  await initLocalTables(client);
   portableDb = drizzle(client, { schema });
   return portableDb;
 }
