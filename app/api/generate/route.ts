@@ -140,6 +140,10 @@ export async function POST(request: Request) {
     const aiQuestions = await generateWithGemini(body, count, answerCount, bloom);
     if (aiQuestions) return Response.json({ questions: aiQuestions, engine: "gemini" });
 
+    if (allFiles.some(f => f.mimeType?.startsWith("image/") || f.mimeType === "application/pdf")) {
+      return Response.json({ error: "Không thể trích xuất nội dung từ Ảnh/PDF khi chưa cấu hình GEMINI_API_KEY. Vui lòng thêm API Key vào biến môi trường hoặc nhập văn bản thuần để dùng tạm." }, { status: 400 });
+    }
+
     const questions = buildQuestions({
       topic: body.topic || "",
       sourceText: body.sourceText || allFiles.map((f) => f.name).join(", ") || "",
