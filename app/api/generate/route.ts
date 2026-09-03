@@ -53,7 +53,6 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  // Collect all source files (support both legacy single file and new multi-file)
   const allSourceFiles: SourceFile[] = [];
   if (body.sourceFiles?.length) allSourceFiles.push(...body.sourceFiles);
   else if (body.sourceFile?.data) allSourceFiles.push(body.sourceFile);
@@ -72,91 +71,98 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
       ].join("\n")
     : [
         "Bạn là giáo viên Việt Nam chuyên ra đề trắc nghiệm THCS và THPT.",
-        "Tạo câu hỏi trắc nghiệm theo chương trình giáo dục phổ thông Việt Nam 2018.",
-        "Câu hỏi phải rõ ràng, chính xác, có một đáp án đúng duy nhất.",
+        "Tạo câu hỏi trắc nghiệm xoay quanh chủ đề được yêu cầu.",
+        "Các đáp án phải rõ ràng, đáp án sai phải hợp lý (distractors tốt).",
       ].join("\n");
 
-  const userPrompt = [
-    `Hãy tạo đúng ${count} câu hỏi trắc nghiệm cho môn ${body.subject || "học"}, ${body.grade || ""},`,
-    `chủ đề: ${body.topic ? `"${body.topic}"` : "theo nội dung tài liệu đính kèm"}.`,
-    `Mỗi câu có đúng ${answerCount} phương án (A, B, C...). Phân bổ theo mức Bloom: ${bloom.join(", ")}.`,
-    "",
-    hasDocument && body.sourceText
-      ? `=== TÀI LIỆU NGUỒN ===\n${body.sourceText.slice(0, 100000)}\n=== HẾT TÀI LIỆU ===`
-      : (allSourceFiles.length ? `Phân tích các tài liệu đính kèm (${allSourceFiles.map((f) => f.name).join(", ")}) và tạo câu hỏi từ nội dung đó.` : ""),
-    "",
-    `Trả về JSON thuần, KHÔNG có markdown wrapper:`,
-    `{"questions":[{"prompt":"Câu hỏi từ tài liệu?","level":"Nhận biết","options":["Đáp án đúng từ tài liệu","Đáp án sai 1","Đáp án sai 2","Đáp án sai 3"],"correctOptionId":"A"}]}`,
-  ].filter(Boolean).join("\n");
+  const parts = [];
+  if (body.sourceText?.trim()) {
+    parts.push({ text: `=== NỘI DUNG TÀI LIỆU NGUỒN ===\n${body.sourceText}\n==========================\n` });
+  }
 
-  const textPart = { text: userPrompt };
-  const parts: Array<Record<string, unknown>> = [textPart];
-  // Attach all files as inlineData parts
+  const filePrompts = allSourceFiles.map(sf => sf.name).filter(Boolean);
+  if (filePrompts.length > 0) {
+    parts.push({ text: `Tài liệu đính kèm: ${filePrompts.join(", ")}` });
+  }
+
   for (const sf of allSourceFiles) {
     if (sf.data && sf.mimeType) {
       parts.push({ inlineData: { mimeType: sf.mimeType, data: sf.data } });
     }
   }
 
-  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const candidateModels = [primaryModel, "gemini-3.5-flash", "gemini-2.5-flash"].filter(
+    (m, idx, arr) => arr.indexOf(m) === idx
+  );
+
   const payload = JSON.stringify({
     systemInstruction: { parts: [{ text: systemInstruction }] },
     contents: [{ role: "user", parts }],
     generationConfig: { responseMimeType: "application/json", temperature: 0.15 },
   });
 
-  const maxRetries = 3;
-  let lastError = "";
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 2000 * Math.pow(2, attempt - 1)));
-    }
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: payload,
-      signal: AbortSignal.timeout(90_000),
-    });
-    const data = await response.json() as {
-      error?: { message?: string; code?: number };
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-    if (!response.ok) {
-      lastError = data.error?.message || "Dịch vụ AI chưa phản hồi.";
-      if ((response.status === 429 || response.status === 503) && attempt < maxRetries - 1) continue;
-      if (/high demand|overloaded|resource exhausted/i.test(lastError)) {
-        throw new Error("Gemini AI đang quá tải. Hệ thống đã thử lại nhưng chưa thành công. Vui lòng đợi 1–2 phút rồi thử lại.");
+  let lastErrorMessage = "";
+
+  for (const model of candidateModels) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: payload,
+        signal: AbortSignal.timeout(60_000),
+      });
+      const data = await response.json() as {
+        error?: { message?: string; code?: number };
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+
+      if (!response.ok) {
+        lastErrorMessage = data.error?.message || `Lỗi từ model ${model}`;
+        if (response.status === 429 || response.status === 503 || /quota|rate limit|exhausted|demand/i.test(lastErrorMessage)) {
+          console.warn(`Model ${model} chạm giới hạn hoặc bận, đang chuyển sang model dự phòng...`);
+          continue;
+        }
+        throw new Error(lastErrorMessage);
       }
-      throw new Error(lastError);
+
+      const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+      const cleaned = extractJson(text);
+      const parsed = JSON.parse(cleaned) as { questions?: unknown };
+      const questions = normalizeQuestions(parsed.questions, count, answerCount, bloom);
+      if (questions.length < Math.ceil(count * 0.6)) {
+        throw new Error(`AI chỉ tạo được ${questions.length}/${count} câu hỏi. Vui lòng kiểm tra lại tài liệu nguồn.`);
+      }
+      return questions;
+    } catch (err) {
+      if (err instanceof Error && /chỉ tạo được/.test(err.message)) throw err;
+      lastErrorMessage = err instanceof Error ? err.message : String(err);
+      continue;
     }
-    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
-    const cleaned = extractJson(text);
-    const parsed = JSON.parse(cleaned) as { questions?: unknown };
-    const questions = normalizeQuestions(parsed.questions, count, answerCount, bloom);
-    if (questions.length < Math.ceil(count * 0.6)) throw new Error(`AI chỉ tạo được ${questions.length}/${count} câu hỏi. Vui lòng kiểm tra lại tài liệu nguồn.`);
-    return questions;
   }
-  throw new Error(lastError || "Dịch vụ AI chưa phản hồi sau nhiều lần thử.");
+
+  if (/quota|rate limit|exhausted/i.test(lastErrorMessage)) {
+    throw new Error("Khóa Gemini miễn phí tạm thời chạm giới hạn số lượt/phút của Google. Vui lòng đợi 30-60 giây rồi nhấn Tạo lại.");
+  }
+  throw new Error(lastErrorMessage || "Không thể kết nối dịch vụ AI. Vui lòng thử lại sau.");
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json() as GenerateBody;
-    const count = Math.max(3, Math.min(20, Number(body.count) || 10));
-    const answerCount = Math.max(2, Math.min(6, Number(body.answerCount) || 4));
-    const selectedBloom = (body.selectedBloom || []).filter((level): level is BloomLevel => validBloom.includes(level));
-    const bloom = selectedBloom.length ? selectedBloom : ["Nhận biết", "Thông hiểu"] as BloomLevel[];
+    const count = body.count && body.count > 0 && body.count <= 50 ? body.count : 10;
+    const answerCount = body.answerCount && body.answerCount >= 2 && body.answerCount <= 6 ? body.answerCount : 4;
+    const bloom = (body.selectedBloom && body.selectedBloom.length > 0 ? body.selectedBloom : validBloom) as BloomLevel[];
 
-    // Validate total file size (all sourceFiles combined)
-    const allFiles = body.sourceFiles || (body.sourceFile ? [body.sourceFile] : []);
-    const totalSize = allFiles.reduce((sum, f) => sum + (f.data?.length || 0), 0);
-    if (totalSize > 30_000_000) {
-      return Response.json({ error: "Tổng dung lượng file quá lớn. Mỗi file tối đa 8 MB, tổng cộng tối đa 20 MB." }, { status: 413 });
+    const geminiQuestions = await generateWithGemini(body, count, answerCount, bloom);
+    if (geminiQuestions) {
+      return Response.json({ questions: geminiQuestions, engine: "gemini" });
     }
 
-    const aiQuestions = await generateWithGemini(body, count, answerCount, bloom);
-    if (aiQuestions) return Response.json({ questions: aiQuestions, engine: "gemini" });
+    const allFiles = [];
+    if (body.sourceFiles) allFiles.push(...body.sourceFiles);
+    else if (body.sourceFile) allFiles.push(body.sourceFile);
 
     if (allFiles.some(f => f.mimeType?.startsWith("image/") || f.mimeType === "application/pdf")) {
       return Response.json({ error: "Không thể trích xuất nội dung từ Ảnh/PDF khi chưa cấu hình GEMINI_API_KEY. Vui lòng thêm API Key vào biến môi trường hoặc nhập văn bản thuần để dùng tạm." }, { status: 400 });
