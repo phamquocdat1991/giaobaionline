@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
-import { BellRing, BookOpen, BrainCircuit, CalendarClock, Check, CheckCircle2, ChevronRight, ClipboardCopy, Clock3, Download, FileSpreadsheet, FileText, GraduationCap, History, KeyRound, LayoutDashboard, Link2, LoaderCircle, Mail, Pencil, QrCode, RefreshCw, Send, Sparkles, Timer, Trash2, UploadCloud, Users, XCircle } from "lucide-react";
+import { BellRing, BookOpen, BrainCircuit, CalendarClock, Check, CheckCircle2, ChevronRight, ClipboardCopy, Clock3, Cloud, Download, FileSpreadsheet, FileText, GraduationCap, History, KeyRound, LayoutDashboard, Link2, LoaderCircle, LogOut, Mail, Pencil, QrCode, RefreshCw, Send, Shield, Sparkles, Timer, Trash2, UploadCloud, Users, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,13 +34,34 @@ const subjects = [
 function normalize(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " "); }
 function formatDuration(seconds: number) { return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`; }
 type UploadedSource = { name: string; mimeType: string; data: string };
+const MAX_FILES = 5;
+const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 
 export default function Home() {
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
   const [section, setSection] = useState<"builder" | "manager">("builder");
   const [classes, setClasses] = useState<Classroom[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [teacherEmail, setTeacherEmail] = useState("giaovien@eduquiz.vn");
+
+  useEffect(() => {
+    const saved = localStorage.getItem("eduquiz_teacher_email");
+    if (saved) { setTeacherEmail(saved); setIsLoggedIn(true); } else { setIsLoggedIn(false); }
+  }, []);
+
+  function handleLogin(email: string) {
+    localStorage.setItem("eduquiz_teacher_email", email);
+    setTeacherEmail(email);
+    setIsLoggedIn(true);
+  }
+
+  function handleLogout() {
+    localStorage.removeItem("eduquiz_teacher_email");
+    setIsLoggedIn(false);
+    setTeacherEmail("giaovien@eduquiz.vn");
+  }
+
   async function loadData(showToast = false) {
     try {
       const [classRes, quizRes, submissionRes] = await Promise.all([fetch("/api/classes"), fetch("/api/quizzes"), fetch("/api/submissions")]);
@@ -51,11 +72,14 @@ export default function Home() {
     } catch { if (showToast) toast.error("Chưa thể đồng bộ. Vui lòng thử lại."); }
   }
   useEffect(() => { const initial = window.setTimeout(() => void loadData(), 0); const timer = window.setInterval(() => void loadData(), 7000); return () => { window.clearTimeout(initial); window.clearInterval(timer); }; }, []);
+  if (isLoggedIn === null) return <div className="student-loading"><span><BrainCircuit /></span><h1>EduQuiz AI</h1><p>Đang tải...</p></div>;
+  if (!isLoggedIn) return <LoginPage onLogin={handleLogin} />;
+
   return <div className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => setSection("builder")} aria-label="Về trang tạo đề"><span className="brand-mark"><BrainCircuit size={22} /></span><span><strong>EduQuiz</strong><small>AI CLASSROOM</small></span></button>
       <nav className="primary-nav" aria-label="Điều hướng chính"><button className={section === "builder" ? "active" : ""} onClick={() => setSection("builder")}><Sparkles size={17} /> Tạo đề AI</button><button className={section === "manager" ? "active" : ""} onClick={() => setSection("manager")}><LayoutDashboard size={17} /> Quản lý học sinh</button></nav>
-      <div className="topbar-actions"><span className="realtime"><span /> Đồng bộ Realtime</span><label className="email-pill"><Mail size={15} /><input value={teacherEmail} onChange={(e) => setTeacherEmail(e.target.value)} aria-label="Gmail giáo viên" /></label></div>
+      <div className="topbar-actions"><span className="realtime"><span /> Đồng bộ Realtime</span><label className="email-pill"><Mail size={15} /><input value={teacherEmail} onChange={(e) => setTeacherEmail(e.target.value)} aria-label="Gmail giáo viên" /></label><button className="logout-btn" onClick={handleLogout} title="Đăng xuất"><LogOut size={16} /></button></div>
     </header>
     {section === "builder" ? <QuizBuilder classes={classes} teacherEmail={teacherEmail} onSaved={(quiz) => setQuizzes((current) => [quiz, ...current.filter((item) => item.id !== quiz.id)])} /> : <ClassManager classes={classes} setClasses={setClasses} quizzes={quizzes} submissions={submissions} onRefresh={() => loadData(true)} />}
     <Toaster position="top-right" richColors />
@@ -66,31 +90,61 @@ function QuizBuilder({ classes, teacherEmail, onSaved }: { classes: Classroom[];
   const [educationLevel, setEducationLevel] = useState("THCS"); const [grade, setGrade] = useState("Lớp 7"); const [subject, setSubject] = useState("Ngữ văn");
   const [questionCount, setQuestionCount] = useState(10); const [answerCount, setAnswerCount] = useState(4);
   const [selectedBloom, setSelectedBloom] = useState<BloomLevel[]>(["Nhận biết", "Thông hiểu", "Vận dụng thấp"]);
-  const [topic, setTopic] = useState("Bầy chim chìa vôi"); const [sourceMode, setSourceMode] = useState<"file" | "text">("file"); const [sourceText, setSourceText] = useState(""); const [fileName, setFileName] = useState(""); const [sourceFile, setSourceFile] = useState<UploadedSource | null>(null);
+  const [topic, setTopic] = useState("Bầy chim chìa vôi"); const [sourceMode, setSourceMode] = useState<"file" | "text">("file"); const [sourceText, setSourceText] = useState("");
+  const [fileNames, setFileNames] = useState<string[]>([]); const [sourceFiles, setSourceFiles] = useState<UploadedSource[]>([]);
+  const [isDragging, setIsDragging] = useState(false); const dropRef = useRef<HTMLLabelElement>(null);
   const [deadline, setDeadline] = useState(""); const [timeLimitMinutes, setTimeLimitMinutes] = useState(45);
   const [questions, setQuestions] = useState<Question[]>([]); const [generating, setGenerating] = useState(false); const [quizId, setQuizId] = useState("");
   const [assignedClassId, setAssignedClassId] = useState(classes[0]?.id || ""); const [shareOpen, setShareOpen] = useState(false); const [editIndex, setEditIndex] = useState<number | null>(null); const [qrData, setQrData] = useState("");
   const shareUrl = typeof window !== "undefined" && quizId ? `${window.location.origin}/bai-lam/${quizId}` : "";
   useEffect(() => { if (shareOpen && shareUrl) QRCode.toDataURL(shareUrl, { width: 260, margin: 1, color: { dark: "#1f285a", light: "#ffffff" } }).then(setQrData); }, [shareOpen, shareUrl]);
   function toggleBloom(level: BloomLevel) { setSelectedBloom((current) => current.includes(level) ? current.filter((item) => item !== level) : [...current, level]); }
-  async function handleSourceFile(file?: File) {
-    if (!file) return;
-    if (file.size > 8 * 1024 * 1024) return toast.error("Tệp quá lớn. Vui lòng chọn tệp dưới 8 MB.");
-    setFileName(file.name); setSourceText(""); setSourceFile(null);
-    try {
-      const extension = file.name.split(".").pop()?.toLowerCase();
-      if (extension === "txt") { setSourceText(await file.text()); toast.success("Đã đọc nội dung tệp TXT."); return; }
-      if (extension === "docx") { const mammoth = await import("mammoth"); const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() }); setSourceText(result.value); toast.success("Đã trích xuất nội dung tệp Word."); return; }
-      if (extension === "doc") { setFileName(""); return toast.error("Định dạng .doc cũ chưa được hỗ trợ. Vui lòng lưu lại thành .docx."); }
-      if (file.type === "application/pdf" || file.type.startsWith("image/")) { const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); }); setSourceFile({ name: file.name, mimeType: file.type, data: dataUrl.split(",")[1] || "" }); toast.success("Đã sẵn sàng phân tích tài liệu bằng AI/OCR."); return; }
-      setFileName(""); toast.error("Chỉ hỗ trợ PDF, DOCX, TXT, JPG và PNG.");
-    } catch { setFileName(""); setSourceFile(null); toast.error("Không thể đọc tài liệu này."); }
+
+  async function processOneFile(file: File): Promise<{ text: string; binary: UploadedSource | null }> {
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    if (extension === "txt") { return { text: await file.text(), binary: null }; }
+    if (extension === "docx") { const mammoth = await import("mammoth"); const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() }); return { text: result.value, binary: null }; }
+    if (extension === "doc") { throw new Error(`Định dạng .doc cũ chưa được hỗ trợ: ${file.name}`); }
+    if (file.type === "application/pdf" || file.type.startsWith("image/")) {
+      const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+      return { text: "", binary: { name: file.name, mimeType: file.type, data: dataUrl.split(",")[1] || "" } };
+    }
+    throw new Error(`Định dạng không hỗ trợ: ${file.name}`);
+  }
+
+  async function handleSourceFiles(fileList: FileList) {
+    const files = Array.from(fileList).slice(0, MAX_FILES);
+    if (!files.length) return;
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > MAX_TOTAL_BYTES) return toast.error(`Tổng dung lượng vượt quá 20 MB. Vui lòng chọn ít file hơn.`);
+    const oversized = files.find((f) => f.size > 8 * 1024 * 1024);
+    if (oversized) return toast.error(`Tệp "${oversized.name}" quá lớn. Mỗi tệp tối đa 8 MB.`);
+    const names: string[] = []; let combinedText = ""; const binaries: UploadedSource[] = [];
+    let errored = 0;
+    for (const file of files) {
+      try {
+        const result = await processOneFile(file);
+        names.push(file.name);
+        if (result.text) combinedText += (combinedText ? "\n\n--- " + file.name + " ---\n" : "") + result.text;
+        if (result.binary) binaries.push(result.binary);
+      } catch (e) { errored++; toast.error(e instanceof Error ? e.message : `Không đọc được ${file.name}.`); }
+    }
+    if (names.length > 0) {
+      setFileNames(names); setSourceText(combinedText); setSourceFiles(binaries);
+      toast.success(`Đã tải ${names.length} tệp${errored ? ` (${errored} lỗi)` : ""}.`);
+    }
+  }
+
+  function removeFile(index: number) {
+    setFileNames((prev) => prev.filter((_, i) => i !== index));
+    setSourceFiles((prev) => prev.filter((f) => !f.name.endsWith(fileNames[index] ?? "")));
+    if (fileNames.length <= 1) setSourceText("");
   }
   async function generateQuiz() {
-    if (!topic.trim() && !sourceText.trim() && !fileName) return toast.error("Vui lòng nhập chủ đề hoặc chọn tài liệu nguồn.");
+    if (!topic.trim() && !sourceText.trim() && !fileNames.length) return toast.error("Vui lòng nhập chủ đề hoặc chọn tài liệu nguồn.");
     if (!selectedBloom.length) return toast.error("Vui lòng chọn ít nhất một mức độ Bloom.");
     setGenerating(true); setQuestions([]);
-    try { const response = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic, subject, grade, sourceText, sourceFile, count: questionCount, answerCount, selectedBloom }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); await new Promise((r) => setTimeout(r, 650)); setQuestions(data.questions); setQuizId(crypto.randomUUID()); toast.success(data.engine === "gemini" ? `AI đã tạo ${data.questions.length} câu hỏi từ tài liệu.` : `Đã tạo ${data.questions.length} câu hỏi. Cần cấu hình khóa Gemini để bật AI/OCR thật.`); }
+    try { const response = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic, subject, grade, sourceText, sourceFiles, count: questionCount, answerCount, selectedBloom }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); await new Promise((r) => setTimeout(r, 650)); setQuestions(data.questions); setQuizId(crypto.randomUUID()); toast.success(data.engine === "gemini" ? `AI đã tạo ${data.questions.length} câu hỏi từ tài liệu.` : `Đã tạo ${data.questions.length} câu hỏi. Cần cấu hình khóa Gemini để bật AI/OCR thật.`); }
     catch (error) { toast.error(error instanceof Error ? error.message : "Không thể tạo câu hỏi."); } finally { setGenerating(false); }
   }
   async function publishQuiz() {
@@ -123,7 +177,7 @@ function QuizBuilder({ classes, teacherEmail, onSaved }: { classes: Classroom[];
         <div className="attempt-policy"><KeyRound /><span><strong>Giới hạn 3 lượt làm</strong><small>Hệ thống tự động khóa sau lần nộp thứ 3.</small></span></div>
         <div className="field-block"><label className="field-label">Mức độ nhận thức (Bloom)</label><div className="bloom-list">{bloomLevels.map((level) => <label key={level}><Checkbox checked={selectedBloom.includes(level)} onCheckedChange={() => toggleBloom(level)} /><span>{level}</span></label>)}</div></div>
         <Field label="Tên bài học / Chủ đề ôn tập" optional><Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="VD: Bài 3 – Sống cùng thiên nhiên..." /></Field>
-        <div className="field-block"><label className="field-label">Tài liệu nguồn</label><div className="segmented"><button className={sourceMode === "file" ? "active" : ""} onClick={() => setSourceMode("file")}>Tải file</button><button className={sourceMode === "text" ? "active" : ""} onClick={() => setSourceMode("text")}>Nhập văn bản</button></div>{sourceMode === "file" ? <label className={`dropzone ${fileName ? "has-file" : ""}`}><UploadCloud size={27} /><strong>{fileName || "Kéo thả file vào đây"}</strong><span>{fileName ? "Đã đọc nội dung · nhấn để đổi tệp" : "hoặc nhấn để chọn từ máy"}</span><small>PDF, DOCX, TXT, JPG, PNG · tối đa 8 MB</small><input type="file" accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png" onChange={(e) => void handleSourceFile(e.target.files?.[0])} /></label> : <Textarea value={sourceText} onChange={(e) => setSourceText(e.target.value)} className="min-h-36" placeholder="Dán nội dung bài học hoặc tài liệu vào đây..." />}</div>
+        <div className="field-block"><label className="field-label">Tài liệu nguồn</label><div className="segmented"><button className={sourceMode === "file" ? "active" : ""} onClick={() => setSourceMode("file")}>Tải file</button><button className={sourceMode === "text" ? "active" : ""} onClick={() => setSourceMode("text")}>Nhập văn bản</button></div>{sourceMode === "file" ? (<div className="dropzone-area">{fileNames.length > 0 && <div className="file-chips">{fileNames.map((name, idx) => <span key={name} className="file-chip"><span>{name}</span><button type="button" onClick={() => removeFile(idx)} aria-label={`Xóa ${name}`}><X size={12} /></button></span>)}</div>}<label ref={dropRef} className={`dropzone ${fileNames.length ? "has-file" : ""} ${isDragging ? "dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files.length) void handleSourceFiles(e.dataTransfer.files); }}><UploadCloud size={27} /><strong>{fileNames.length ? `${fileNames.length} tệp đã chọn · kéo thêm hoặc nhấn` : "Kéo thả file vào đây"}</strong><span>{fileNames.length ? `Tổng ${fileNames.length}/${MAX_FILES} tệp · nhấn để thêm` : "hoặc nhấn để chọn từ máy"}</span><small>PDF, DOCX, TXT, JPG, PNG · tối đa 5 tệp · mỗi tệp ≤ 8 MB</small><input type="file" multiple accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png" onChange={(e) => e.target.files && void handleSourceFiles(e.target.files)} /></label></div>) : <Textarea value={sourceText} onChange={(e) => setSourceText(e.target.value)} className="min-h-36" placeholder="Dán nội dung bài học hoặc tài liệu vào đây..." />}</div>
         <Button className="generate-button" onClick={generateQuiz} disabled={generating}><Sparkles /> {generating ? "Đang tạo câu hỏi..." : "Tạo Quiz Ngay"}</Button>
       </aside>
       <section className="workspace-card"><div className="workspace-header"><div><h2>Khu vực hiển thị</h2><p>{questions.length ? `Kết quả: ${questions.length} câu hỏi` : "Bản nháp sẽ xuất hiện tại đây"}</p></div>{questions.length > 0 && <Button className="purple-button" onClick={publishQuiz}><Link2 /> Link làm bài cho HS</Button>}</div>
@@ -222,3 +276,65 @@ function ClassManager({ classes, setClasses, quizzes, submissions, onRefresh }: 
 function Stat({ label, value, suffix, tone, icon, badge }: { label: string; value: string | number; suffix: string; tone: string; icon: React.ReactNode; badge?: string }) { return <article className={`stat-card ${tone}`}><div className="stat-label"><span>{icon}</span>{label}{badge && <b>{badge}</b>}</div><strong>{value} <small>{suffix}</small></strong></article>; }
 function SubmissionTable({ rows, quizzes }: { rows: Submission[]; quizzes: Quiz[] }) { return rows.length ? <div className="data-table"><Table><TableHeader><TableRow><TableHead>Học sinh</TableHead><TableHead>Mã HS</TableHead><TableHead>Lớp</TableHead><TableHead>Bài tập</TableHead><TableHead>Điểm</TableHead><TableHead>Thời gian</TableHead><TableHead>Lượt</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell className="font-semibold">{row.studentName}</TableCell><TableCell>{row.studentCode || "—"}</TableCell><TableCell>{row.className}</TableCell><TableCell>{quizzes.find((quiz) => quiz.id === row.quizId)?.title || "Bài tập"}</TableCell><TableCell><span className="score-chip">{row.score}/10</span></TableCell><TableCell>{formatDuration(row.durationSeconds)}</TableCell><TableCell>Lần {row.attemptNumber}/3</TableCell></TableRow>)}</TableBody></Table></div> : <div className="table-empty"><span><History /></span><h3>Chưa có học sinh nào nộp bài</h3><p>Kết quả sẽ tự động xuất hiện tại đây sau khi học sinh nhấn “Nộp bài”.</p></div>; }
 function StudentStatusTable({ mode, classroom, submissions, done, pending }: { mode: string; classroom?: Classroom; submissions: Submission[]; done: Student[]; pending: Student[] }) { if (!classroom) return <div className="table-empty"><h3>Chưa có danh sách lớp</h3></div>; const students = mode === "done" ? done : mode === "pending" ? pending : classroom.students; if (!students.length) return <div className="table-empty"><span>{mode === "done" ? <CheckCircle2 /> : <Users />}</span><h3>{mode === "done" ? "Chưa có học sinh hoàn thành bài" : "Tất cả học sinh đã hoàn thành"}</h3></div>; return <div className="data-table"><Table><TableHeader><TableRow><TableHead>Mã học sinh</TableHead><TableHead>Họ và tên</TableHead><TableHead>Lớp</TableHead>{mode === "pending" ? <TableHead>Liên hệ</TableHead> : <><TableHead>Số lượt nộp</TableHead><TableHead>Điểm trung bình</TableHead></>}</TableRow></TableHeader><TableBody>{students.map((student) => { const rows = submissions.filter((item) => item.studentCode === student.code || normalize(item.studentName) === normalize(student.name)); const average = rows.length ? rows.reduce((sum, item) => sum + item.score, 0) / rows.length : 0; return <TableRow key={student.id}><TableCell><b className="student-code">{student.code}</b></TableCell><TableCell className="font-semibold">{student.name}</TableCell><TableCell>{classroom.name}</TableCell>{mode === "pending" ? <TableCell><span className="pending-chip">{student.email || student.zaloUserId ? "Sẵn sàng nhắc" : "Thiếu liên hệ"}</span></TableCell> : <><TableCell><span className="done-chip">{rows.length}/3 lượt</span></TableCell><TableCell>{rows.length ? `${average.toFixed(1)}/10` : "—"}</TableCell></>}</TableRow>; })}</TableBody></Table></div>; }
+
+function LoginPage({ onLogin }: { onLogin: (email: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [tab, setTab] = useState<"teacher" | "google">("teacher");
+  const [loading, setLoading] = useState(false);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed || !trimmed.includes("@")) return toast.error("Vui lòng nhập email hợp lệ.");
+    setLoading(true);
+    setTimeout(() => { setLoading(false); onLogin(trimmed); }, 800);
+  }
+
+  function handleGoogleMock() {
+    setLoading(true);
+    setTimeout(() => { setLoading(false); onLogin("giaovien@gmail.com"); }, 1000);
+  }
+
+  return (
+    <div className="login-bg">
+      <div className="login-card">
+        <div className="login-logo"><BrainCircuit size={36} /><div><strong>EduQuiz</strong><small>AI CLASSROOM</small></div></div>
+        <div className="login-eyebrow"><Sparkles size={14} /> Dành cho Giáo viên &amp; Quản trị</div>
+        <h1 className="login-title">Đăng nhập EduQuiz AI</h1>
+        <p className="login-desc">Quản lý lớp học, tạo đề thi bằng AI và theo dõi kết quả học sinh theo thời gian thực.</p>
+
+        <div className="login-tabs">
+          <button className={tab === "teacher" ? "active" : ""} onClick={() => setTab("teacher")}><Users size={15} /> Đăng nhập Giáo viên</button>
+          <button className={tab === "google" ? "active" : ""} onClick={() => setTab("google")}><span className="g-icon">G</span> Google Account</button>
+        </div>
+
+        {tab === "google" ? (
+          <div className="login-google-section">
+            <button className="google-signin-btn" onClick={handleGoogleMock} disabled={loading}>
+              <span className="g-icon-lg">G</span>
+              <span>{loading ? "Đang đăng nhập..." : "Đăng nhập với Google"}</span>
+            </button>
+            <p className="login-google-note">Đăng nhập Google đồng bộ hóa đề thi và dữ liệu với tài khoản của bạn.</p>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="login-form">
+            <label className="login-field-label"><Mail size={14} /> Email giáo viên</label>
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="giaovien@truong.edu.vn" autoFocus className="login-input" />
+            <Button type="submit" className="login-submit" disabled={loading}>
+              {loading ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}
+              {loading ? "Đang xác thực..." : "Vào Dashboard"}
+            </Button>
+          </form>
+        )}
+
+        <div className="login-features">
+          <div><Cloud size={16} /><span>Đồng bộ đề thi tự động trên <strong>Database Cloud</strong></span></div>
+          <div><FileText size={16} /><span>Tạo mã làm bài &amp; Xuất đề thi PDF / QR Code</span></div>
+          <div><Shield size={16} /><span>Trợ lý <strong>AI Gemini</strong> hỗ trợ tạo đề tự động</span></div>
+        </div>
+        <p className="login-student-note">Học sinh tham gia làm bài trực tiếp qua Link hoặc Mã QR mà không cần đăng nhập tài khoản.</p>
+      </div>
+    </div>
+  );
+}
+
