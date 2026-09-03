@@ -99,27 +99,45 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
   }
 
   const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemInstruction }] },
-      contents: [{ role: "user", parts }],
-      generationConfig: { responseMimeType: "application/json", temperature: 0.15 },
-    }),
-    signal: AbortSignal.timeout(90_000),
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const payload = JSON.stringify({
+    systemInstruction: { parts: [{ text: systemInstruction }] },
+    contents: [{ role: "user", parts }],
+    generationConfig: { responseMimeType: "application/json", temperature: 0.15 },
   });
-  const data = await response.json() as {
-    error?: { message?: string };
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  if (!response.ok) throw new Error(data.error?.message || "Dịch vụ AI chưa phản hồi.");
-  const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
-  const cleaned = extractJson(text);
-  const parsed = JSON.parse(cleaned) as { questions?: unknown };
-  const questions = normalizeQuestions(parsed.questions, count, answerCount, bloom);
-  if (questions.length < Math.ceil(count * 0.6)) throw new Error(`AI chỉ tạo được ${questions.length}/${count} câu hỏi. Vui lòng kiểm tra lại tài liệu nguồn.`);
-  return questions;
+
+  const maxRetries = 3;
+  let lastError = "";
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 2000 * Math.pow(2, attempt - 1)));
+    }
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: payload,
+      signal: AbortSignal.timeout(90_000),
+    });
+    const data = await response.json() as {
+      error?: { message?: string; code?: number };
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    if (!response.ok) {
+      lastError = data.error?.message || "Dịch vụ AI chưa phản hồi.";
+      if ((response.status === 429 || response.status === 503) && attempt < maxRetries - 1) continue;
+      if (/high demand|overloaded|resource exhausted/i.test(lastError)) {
+        throw new Error("Gemini AI đang quá tải. Hệ thống đã thử lại nhưng chưa thành công. Vui lòng đợi 1–2 phút rồi thử lại.");
+      }
+      throw new Error(lastError);
+    }
+    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+    const cleaned = extractJson(text);
+    const parsed = JSON.parse(cleaned) as { questions?: unknown };
+    const questions = normalizeQuestions(parsed.questions, count, answerCount, bloom);
+    if (questions.length < Math.ceil(count * 0.6)) throw new Error(`AI chỉ tạo được ${questions.length}/${count} câu hỏi. Vui lòng kiểm tra lại tài liệu nguồn.`);
+    return questions;
+  }
+  throw new Error(lastError || "Dịch vụ AI chưa phản hồi sau nhiều lần thử.");
 }
 
 export async function POST(request: Request) {
