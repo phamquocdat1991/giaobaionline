@@ -8,6 +8,7 @@ type GenerateBody = {
   grade?: string;
   sourceText?: string;
   sourceFile?: SourceFile | null;
+  sourceFiles?: SourceFile[];
   count?: number;
   answerCount?: number;
   selectedBloom?: BloomLevel[];
@@ -52,18 +53,49 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  const prompt = [
-    "Bạn là chuyên gia biên soạn câu hỏi trắc nghiệm cho giáo dục Việt Nam.",
-    `Hãy tạo đúng ${count} câu hỏi cho môn ${body.subject || "học"}, ${body.grade || ""}, chủ đề: ${body.topic || "theo tài liệu"}.`,
-    `Mỗi câu có đúng ${answerCount} phương án. Chỉ dùng các mức Bloom: ${bloom.join(", ")}.`,
-    "Câu hỏi phải bám sát tài liệu, rõ ràng, chỉ có một đáp án đúng, không bịa dữ kiện ngoài nguồn.",
-    "Trả về JSON thuần có dạng {\"questions\":[{\"prompt\":\"...\",\"level\":\"Nhận biết\",\"options\":[\"...\"],\"correctOptionId\":\"A\"}]}.",
-    body.sourceText ? `Nội dung nguồn:\n${body.sourceText.slice(0, 120000)}` : "",
-  ].filter(Boolean).join("\n\n");
+  // Collect all source files (support both legacy single file and new multi-file)
+  const allSourceFiles: SourceFile[] = [];
+  if (body.sourceFiles?.length) allSourceFiles.push(...body.sourceFiles);
+  else if (body.sourceFile?.data) allSourceFiles.push(body.sourceFile);
 
-  const parts: Array<Record<string, unknown>> = [{ text: prompt }];
-  if (body.sourceFile?.data && body.sourceFile.mimeType) {
-    parts.push({ inlineData: { mimeType: body.sourceFile.mimeType, data: body.sourceFile.data } });
+  const hasDocument = body.sourceText?.trim() || allSourceFiles.length > 0;
+
+  const systemInstruction = hasDocument
+    ? [
+        "Bạn là giáo viên Việt Nam chuyên ra đề trắc nghiệm THCS và THPT.",
+        "NHIỆM VỤ DUY NHẤT: Tạo câu hỏi trắc nghiệm DỰA TRÊN NỘI DUNG TÀI LIỆU NGUỒN được cung cấp.",
+        "QUY TẮC BẮT BUỘC:",
+        "1. CHỈ hỏi về thông tin CÓ trong tài liệu. KHÔNG bịa đặt, KHÔNG thêm kiến thức ngoài tài liệu.",
+        "2. Mỗi câu hỏi phải trích dẫn hoặc diễn giải trực tiếp từ nội dung tài liệu.",
+        "3. Các đáp án sai phải hợp lý nhưng SAI so với tài liệu (không dùng đáp án vô nghĩa).",
+        "4. Nếu tài liệu không đủ nội dung cho số câu yêu cầu, hãy tạo số câu có thể từ nội dung hiện có.",
+      ].join("\n")
+    : [
+        "Bạn là giáo viên Việt Nam chuyên ra đề trắc nghiệm THCS và THPT.",
+        "Tạo câu hỏi trắc nghiệm theo chương trình giáo dục phổ thông Việt Nam 2018.",
+        "Câu hỏi phải rõ ràng, chính xác, có một đáp án đúng duy nhất.",
+      ].join("\n");
+
+  const userPrompt = [
+    `Hãy tạo đúng ${count} câu hỏi trắc nghiệm cho môn ${body.subject || "học"}, ${body.grade || ""},`,
+    `chủ đề: ${body.topic ? `"${body.topic}"` : "theo nội dung tài liệu đính kèm"}.`,
+    `Mỗi câu có đúng ${answerCount} phương án (A, B, C...). Phân bổ theo mức Bloom: ${bloom.join(", ")}.`,
+    "",
+    hasDocument && body.sourceText
+      ? `=== TÀI LIỆU NGUỒN ===\n${body.sourceText.slice(0, 100000)}\n=== HẾT TÀI LIỆU ===`
+      : (allSourceFiles.length ? `Phân tích các tài liệu đính kèm (${allSourceFiles.map((f) => f.name).join(", ")}) và tạo câu hỏi từ nội dung đó.` : ""),
+    "",
+    `Trả về JSON thuần, KHÔNG có markdown wrapper:`,
+    `{"questions":[{"prompt":"Câu hỏi từ tài liệu?","level":"Nhận biết","options":["Đáp án đúng từ tài liệu","Đáp án sai 1","Đáp án sai 2","Đáp án sai 3"],"correctOptionId":"A"}]}`,
+  ].filter(Boolean).join("\n");
+
+  const textPart = { text: userPrompt };
+  const parts: Array<Record<string, unknown>> = [textPart];
+  // Attach all files as inlineData parts
+  for (const sf of allSourceFiles) {
+    if (sf.data && sf.mimeType) {
+      parts.push({ inlineData: { mimeType: sf.mimeType, data: sf.data } });
+    }
   }
 
   const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
@@ -71,10 +103,11 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemInstruction }] },
       contents: [{ role: "user", parts }],
-      generationConfig: { responseMimeType: "application/json", temperature: 0.25 },
+      generationConfig: { responseMimeType: "application/json", temperature: 0.15 },
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(90_000),
   });
   const data = await response.json() as {
     error?: { message?: string };
@@ -85,7 +118,7 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
   const cleaned = extractJson(text);
   const parsed = JSON.parse(cleaned) as { questions?: unknown };
   const questions = normalizeQuestions(parsed.questions, count, answerCount, bloom);
-  if (questions.length !== count) throw new Error("AI trả về thiếu câu hỏi. Vui lòng thử lại.");
+  if (questions.length < Math.ceil(count * 0.6)) throw new Error(`AI chỉ tạo được ${questions.length}/${count} câu hỏi. Vui lòng kiểm tra lại tài liệu nguồn.`);
   return questions;
 }
 
@@ -96,8 +129,12 @@ export async function POST(request: Request) {
     const answerCount = Math.max(2, Math.min(6, Number(body.answerCount) || 4));
     const selectedBloom = (body.selectedBloom || []).filter((level): level is BloomLevel => validBloom.includes(level));
     const bloom = selectedBloom.length ? selectedBloom : ["Nhận biết", "Thông hiểu"] as BloomLevel[];
-    if (body.sourceFile?.data && body.sourceFile.data.length > 12_000_000) {
-      return Response.json({ error: "Tệp quá lớn. Vui lòng chọn tệp dưới 8 MB." }, { status: 413 });
+
+    // Validate total file size (all sourceFiles combined)
+    const allFiles = body.sourceFiles || (body.sourceFile ? [body.sourceFile] : []);
+    const totalSize = allFiles.reduce((sum, f) => sum + (f.data?.length || 0), 0);
+    if (totalSize > 30_000_000) {
+      return Response.json({ error: "Tổng dung lượng file quá lớn. Mỗi file tối đa 8 MB, tổng cộng tối đa 20 MB." }, { status: 413 });
     }
 
     const aiQuestions = await generateWithGemini(body, count, answerCount, bloom);
@@ -105,7 +142,7 @@ export async function POST(request: Request) {
 
     const questions = buildQuestions({
       topic: body.topic || "",
-      sourceText: body.sourceText || body.sourceFile?.name || "",
+      sourceText: body.sourceText || allFiles.map((f) => f.name).join(", ") || "",
       count,
       answerCount,
       selectedBloom: bloom,
