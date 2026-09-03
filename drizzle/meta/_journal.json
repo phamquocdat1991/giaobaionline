@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788414106330,
+      "tag": "0000_ordinary_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788414125950,
+      "tag": "0001_lovely_franklin_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788416449303,
+      "tag": "0002_absurd_leader",
+      "breakpoints": true
+    }
+  ]
+}
