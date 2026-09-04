@@ -4,10 +4,14 @@ import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 export const classrooms = sqliteTable("classrooms", {
   id: text("id").primaryKey(),
   code: text("code").notNull().default(""),
+  ownerEmail: text("owner_email").notNull().default(""),
   name: text("name").notNull(),
   studentsJson: text("students_json").notNull().default("[]"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [index("idx_classrooms_code").on(table.code)]);
+}, (table) => [
+  index("idx_classrooms_code").on(table.code),
+  index("idx_classrooms_owner_email").on(table.ownerEmail),
+]);
 
 export const quizzes = sqliteTable("quizzes", {
   id: text("id").primaryKey(),
@@ -25,7 +29,10 @@ export const quizzes = sqliteTable("quizzes", {
   maxAttempts: integer("max_attempts").notNull().default(3),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [index("idx_quizzes_assigned_class").on(table.assignedClassId)]);
+}, (table) => [
+  index("idx_quizzes_assigned_class").on(table.assignedClassId),
+  index("idx_quizzes_teacher_email").on(table.teacherEmail),
+]);
 
 export const submissions = sqliteTable("submissions", {
   id: text("id").primaryKey(),

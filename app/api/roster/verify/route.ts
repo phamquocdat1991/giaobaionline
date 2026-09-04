@@ -20,7 +20,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "Bài tập đã quá hạn nộp." }, { status: 410 });
     }
 
-    const classRows = await db.select().from(classrooms);
+    const classRows = quiz.assignedClassId
+      ? await db.select().from(classrooms).where(eq(classrooms.id, quiz.assignedClassId))
+      : await db.select().from(classrooms).where(eq(classrooms.ownerEmail, quiz.teacherEmail));
     const classroom = classRows.map(mapClassroom).find((item: ReturnType<typeof mapClassroom>) => item.code === classCode);
     if (!classroom) return Response.json({ error: "Mã lớp không chính xác." }, { status: 404 });
     if (quiz.assignedClassId && quiz.assignedClassId !== classroom.id) {

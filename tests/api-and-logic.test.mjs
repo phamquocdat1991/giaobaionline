@@ -18,7 +18,7 @@ after(async () => {
 });
 
 test("extractJson correctly parses various Gemini response formats", async () => {
-  const { extractJson } = await vite.ssrLoadModule("/app/api/generate/route.ts");
+  const { extractInteractionText, extractJson, getGeminiModelCandidates } = await vite.ssrLoadModule("/app/api/generate/route.ts");
 
   // Case 1: Plain JSON
   const rawJson = '{"questions":[{"prompt":"Câu 1","options":["A","B"],"correctOptionId":"A"}]}';
@@ -35,6 +35,16 @@ test("extractJson correctly parses various Gemini response formats", async () =>
   // Case 4: Raw text with embedded JSON object
   const embedded = 'Phân tích tài liệu hoàn tất: {"questions":[{"prompt":"Toán học"}]}';
   assert.equal(extractJson(embedded), '{"questions":[{"prompt":"Toán học"}]}');
+
+  const interactionText = extractInteractionText({
+    steps: [{ type: "model_output", content: [{ type: "text", text: rawJson }] }],
+  });
+  assert.equal(interactionText, rawJson);
+  assert.deepEqual(getGeminiModelCandidates("gemini-2.5-flash"), [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+  ], "Obsolete Gemini 2.x configuration must never be retried");
 });
 
 test("roster normalization handles Vietnamese accents and formatting", async () => {
@@ -105,6 +115,56 @@ test("teacher APIs require a server-verified session", async () => {
   }
 });
 
+test("Google OAuth uses state, PKCE and creates a signed teacher session", async () => {
+  process.env.SESSION_SECRET = "test-session-secret-that-is-long-enough-for-oauth";
+  process.env.GOOGLE_CLIENT_ID = "test-client.apps.googleusercontent.com";
+  process.env.GOOGLE_CLIENT_SECRET = "test-client-secret";
+  const originalFetch = globalThis.fetch;
+  try {
+    const { GET: startGoogle } = await vite.ssrLoadModule("/app/api/auth/google/start/route.ts");
+    const startResponse = await startGoogle(new Request("https://quiz.example.com/api/auth/google/start"));
+    const authorizeUrl = new URL(startResponse.headers.get("location"));
+    assert.equal(authorizeUrl.origin, "https://accounts.google.com");
+    assert.equal(authorizeUrl.searchParams.get("response_type"), "code");
+    assert.equal(authorizeUrl.searchParams.get("code_challenge_method"), "S256");
+    assert.ok(authorizeUrl.searchParams.get("state"));
+    assert.ok(authorizeUrl.searchParams.get("nonce"));
+    assert.ok(authorizeUrl.searchParams.get("code_challenge"));
+
+    const flowCookie = startResponse.headers.get("set-cookie").split(";")[0];
+    const { getGoogleOAuthFlow } = await vite.ssrLoadModule("/lib/auth.ts");
+    const flow = await getGoogleOAuthFlow(new Request("https://quiz.example.com", { headers: { cookie: flowCookie } }));
+    assert.ok(flow);
+
+    const encodedClaims = Buffer.from(JSON.stringify({
+      aud: process.env.GOOGLE_CLIENT_ID,
+      email: "verified.teacher@example.com",
+      email_verified: true,
+      exp: Math.floor(Date.now() / 1000) + 300,
+      iss: "https://accounts.google.com",
+      nonce: flow.nonce,
+      sub: "google-user-123",
+    })).toString("base64url");
+    globalThis.fetch = async (url) => String(url).includes("/token")
+      ? Response.json({ access_token: "google-access-token", id_token: `header.${encodedClaims}.signature` })
+      : Response.json({ email: "verified.teacher@example.com", email_verified: true, sub: "google-user-123" });
+
+    const { GET: finishGoogle } = await vite.ssrLoadModule("/app/api/auth/google/callback/route.ts");
+    const callbackResponse = await finishGoogle(new Request(
+      `https://quiz.example.com/api/auth/google/callback?code=test-code&state=${encodeURIComponent(flow.state)}`,
+      { headers: { cookie: flowCookie } },
+    ));
+    assert.equal(callbackResponse.status, 303);
+    assert.equal(callbackResponse.headers.get("location"), "https://quiz.example.com/");
+    assert.match(callbackResponse.headers.get("set-cookie"), /eduquiz_teacher_session=/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.GOOGLE_CLIENT_ID;
+    delete process.env.GOOGLE_CLIENT_SECRET;
+    delete process.env.SESSION_SECRET;
+  }
+});
+
 test("database auto-initializes local SQLite and performs CRUD operations", async () => {
   const { getDb } = await vite.ssrLoadModule("/db/index.ts");
   const { classrooms, quizzes, submissions } = await vite.ssrLoadModule("/db/schema.ts");
@@ -119,6 +179,7 @@ test("database auto-initializes local SQLite and performs CRUD operations", asyn
   await db.insert(classrooms).values({
     id: testClassId,
     code: "TEST9A",
+    ownerEmail: "giaovien@test.vn",
     name: "Lớp Test 9A",
     studentsJson: JSON.stringify([
       { id: "st-1", code: "TEST01", name: "Lê Văn Test", email: "test@edu.vn" }
@@ -209,4 +270,31 @@ test("database auto-initializes local SQLite and performs CRUD operations", asyn
   await db.delete(submissions).where(eq(submissions.quizId, testQuizId));
   await db.delete(quizzes).where(eq(quizzes.id, testQuizId));
   await db.delete(classrooms).where(eq(classrooms.id, testClassId));
+});
+
+test("teacher data is isolated by verified email", async () => {
+  const { getDb } = await vite.ssrLoadModule("/db/index.ts");
+  const { classrooms } = await vite.ssrLoadModule("/db/schema.ts");
+  const { GET } = await vite.ssrLoadModule("/app/api/classes/route.ts");
+  const db = await getDb();
+  const suffix = Date.now();
+  const ownerClassId = `owner-class-${suffix}`;
+  const otherClassId = `other-class-${suffix}`;
+
+  await db.insert(classrooms).values([
+    { id: ownerClassId, code: `OWN${suffix}`, ownerEmail: "owner@example.com", name: "Lớp của Owner", studentsJson: "[]" },
+    { id: otherClassId, code: `OTHER${suffix}`, ownerEmail: "other@example.com", name: "Lớp của người khác", studentsJson: "[]" },
+  ]);
+  try {
+    const response = await GET(new Request("http://localhost/api/classes", {
+      headers: { "oai-authenticated-user-email": "owner@example.com" },
+    }));
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.ok(data.classes.some((classroom) => classroom.id === ownerClassId));
+    assert.ok(!data.classes.some((classroom) => classroom.id === otherClassId));
+  } finally {
+    await db.delete(classrooms).where(eq(classrooms.id, ownerClassId));
+    await db.delete(classrooms).where(eq(classrooms.id, otherClassId));
+  }
 });

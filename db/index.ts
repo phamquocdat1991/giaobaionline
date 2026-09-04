@@ -5,7 +5,7 @@ let portableDb: unknown;
 let cloudflareDb: unknown;
 
 async function initLocalTables(client: { execute: (sql: string) => Promise<unknown> }) {
-  const statements = databaseStatements();
+  const statements = [...databaseStatements(), ...portableMigrationStatements()];
   for (const sql of statements) {
     try {
       await client.execute(sql);
@@ -20,11 +20,13 @@ function databaseStatements() {
     `CREATE TABLE IF NOT EXISTS classrooms (
       id text PRIMARY KEY NOT NULL,
       code text DEFAULT '' NOT NULL,
+      owner_email text DEFAULT '' NOT NULL,
       name text NOT NULL,
       students_json text DEFAULT '[]' NOT NULL,
       created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
     );`,
     `CREATE INDEX IF NOT EXISTS idx_classrooms_code ON classrooms (code);`,
+    `CREATE INDEX IF NOT EXISTS idx_classrooms_owner_email ON classrooms (owner_email);`,
     `CREATE TABLE IF NOT EXISTS quizzes (
       id text PRIMARY KEY NOT NULL,
       title text NOT NULL,
@@ -43,6 +45,7 @@ function databaseStatements() {
       updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
     );`,
     `CREATE INDEX IF NOT EXISTS idx_quizzes_assigned_class ON quizzes (assigned_class_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_quizzes_teacher_email ON quizzes (teacher_email);`,
     `CREATE TABLE IF NOT EXISTS submissions (
       id text PRIMARY KEY NOT NULL,
       quiz_id text NOT NULL,
@@ -61,6 +64,13 @@ function databaseStatements() {
     `CREATE INDEX IF NOT EXISTS idx_submissions_quiz_id ON submissions (quiz_id);`,
     `CREATE INDEX IF NOT EXISTS idx_submissions_student_class ON submissions (student_name, class_name);`,
     `CREATE INDEX IF NOT EXISTS idx_submissions_quiz_student_code ON submissions (quiz_id, student_code, class_id);`,
+  ];
+}
+
+function portableMigrationStatements() {
+  return [
+    `ALTER TABLE classrooms ADD COLUMN owner_email text DEFAULT '' NOT NULL;`,
+    `CREATE INDEX IF NOT EXISTS idx_classrooms_owner_email ON classrooms (owner_email);`,
   ];
 }
 

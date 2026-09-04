@@ -6,7 +6,8 @@ import { notifyStudent } from "@/lib/notifications";
 import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
 
 export async function POST(request: Request) {
-  if (!(await requireTeacher(request))) return unauthorizedResponse();
+  const session = await requireTeacher(request);
+  if (!session) return unauthorizedResponse();
   try {
     const body = await request.json() as { classId?: string; quizId?: string };
     if (!body.classId || !body.quizId) {
@@ -14,8 +15,8 @@ export async function POST(request: Request) {
     }
     const db = await getDb();
     const [[classRow], [quiz]] = await Promise.all([
-      db.select().from(classrooms).where(eq(classrooms.id, body.classId)).limit(1),
-      db.select().from(quizzes).where(eq(quizzes.id, body.quizId)).limit(1),
+      db.select().from(classrooms).where(and(eq(classrooms.id, body.classId), eq(classrooms.ownerEmail, session.email))).limit(1),
+      db.select().from(quizzes).where(and(eq(quizzes.id, body.quizId), eq(quizzes.teacherEmail, session.email))).limit(1),
     ]);
     if (!classRow || !quiz) return Response.json({ error: "Không tìm thấy lớp hoặc bài tập." }, { status: 404 });
     if (quiz.assignedClassId && quiz.assignedClassId !== classRow.id) {
