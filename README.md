@@ -46,15 +46,27 @@ Mã nguồn dùng Next.js và đã được kiểm tra bằng `next build`. Đ�
 TURSO_DATABASE_URL=libsql://...
 TURSO_AUTH_TOKEN=...
 GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 RESEND_API_KEY=...
 RESEND_FROM_EMAIL=EduQuiz <quiz@tenmiencuaban.vn>
 ZALO_OA_ACCESS_TOKEN=...
 TEACHER_ACCESS_CODE=...
 SESSION_SECRET=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://giaobaionline.vercel.app/api/auth/google/callback
 ```
 
 4. Đẩy dự án lên GitHub, import repository vào Vercel và deploy bằng cấu hình Next.js mặc định.
+
+### Đăng nhập bằng Google
+
+1. Trong Google Cloud Console, tạo OAuth Client loại **Web application**.
+2. Thêm redirect URI chính xác: `https://giaobaionline.vercel.app/api/auth/google/callback`.
+3. Đặt `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` trên môi trường Production của Vercel. `SESSION_SECRET` phải là chuỗi ngẫu nhiên tối thiểu 32 ký tự.
+4. Redeploy. Khi đủ cấu hình, màn hình tự chuyển sang nút **Đăng nhập bằng Google** và tắt luồng mã truy cập dùng chung.
+
+Trước khi đủ biến Google, `TEACHER_ACCESS_CODE` vẫn hoạt động để quản trị viên không bị khóa khỏi ứng dụng. Phiên Google dùng Authorization Code, PKCE, `state`, `nonce` và cookie `HttpOnly`; dữ liệu lớp, Quiz và bài nộp được giới hạn theo email giáo viên đã xác minh.
 
 Trước khi deploy, có thể chạy toàn bộ kiểm tra bằng:
 
@@ -68,7 +80,7 @@ Trên ChatGPT Sites, ứng dụng sử dụng D1 được khai báo trong `.open
 
 ## Cấu trúc dữ liệu
 
-- `classrooms`: lớp, mã lớp và danh sách học sinh có mã/liên hệ.
+- `classrooms`: lớp, email chủ sở hữu, mã lớp và danh sách học sinh có mã/liên hệ.
 - `quizzes`: cấu hình đề, hạn nộp, thời lượng và nội dung câu hỏi.
 - `submissions`: lượt nộp, định danh học sinh, đáp án, điểm và thời gian làm bài.
 

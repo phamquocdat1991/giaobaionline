@@ -1,4 +1,4 @@
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classrooms, quizzes, submissions } from "@/db/schema";
 import type { Question, Student } from "@/components/eduquiz/types";
@@ -9,13 +9,21 @@ import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
 const mapSubmission = (row: typeof submissions.$inferSelect) => ({ ...row, answers: JSON.parse(row.answersJson) });
 
 export async function GET(request: Request) {
-  if (!(await requireTeacher(request))) return unauthorizedResponse();
+  const session = await requireTeacher(request);
+  if (!session) return unauthorizedResponse();
   try {
     const quizId = new URL(request.url).searchParams.get("quizId");
     const db = await getDb();
+    const ownedQuizzes = await db.select({ id: quizzes.id }).from(quizzes).where(eq(quizzes.teacherEmail, session.email));
+    const ownedQuizIds = ownedQuizzes.map((row: { id: string }) => row.id);
+    if (quizId && !ownedQuizIds.includes(quizId)) {
+      return Response.json({ error: "Bạn không có quyền xem bài nộp của bài tập này." }, { status: 403 });
+    }
     const rows = quizId
       ? await db.select().from(submissions).where(eq(submissions.quizId, quizId)).orderBy(desc(submissions.createdAt))
-      : await db.select().from(submissions).orderBy(desc(submissions.createdAt));
+      : ownedQuizIds.length
+        ? await db.select().from(submissions).where(inArray(submissions.quizId, ownedQuizIds)).orderBy(desc(submissions.createdAt))
+        : [];
     return Response.json({ submissions: rows.map(mapSubmission) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Không thể tải bài nộp." }, { status: 500 });
@@ -44,7 +52,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "Bài tập đã quá hạn nộp." }, { status: 410 });
     }
 
-    const classRows = await db.select().from(classrooms);
+    const classRows = quiz.assignedClassId
+      ? await db.select().from(classrooms).where(eq(classrooms.id, quiz.assignedClassId))
+      : await db.select().from(classrooms).where(eq(classrooms.ownerEmail, quiz.teacherEmail));
     const classroom = classRows.map(mapClassroom).find((item: ReturnType<typeof mapClassroom>) => item.code === classCode);
     if (!classroom || (quiz.assignedClassId && quiz.assignedClassId !== classroom.id)) {
       return Response.json({ error: "Mã lớp không hợp lệ với bài tập này." }, { status: 403 });

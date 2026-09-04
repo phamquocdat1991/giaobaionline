@@ -51,6 +51,24 @@ export function extractJson(text: string): string {
   return text.trim();
 }
 
+export function getGeminiModelCandidates(configuredModel = process.env.GEMINI_MODEL) {
+  const configured = configuredModel?.trim();
+  const supportedConfiguredModel = configured && /^gemini-3(?:\.|-)/.test(configured) ? configured : null;
+  return [supportedConfiguredModel, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+    .filter((model): model is string => Boolean(model))
+    .filter((model, index, models) => models.indexOf(model) === index);
+}
+
+export function extractInteractionText(value: unknown) {
+  const interaction = value as { steps?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
+  return (interaction.steps || [])
+    .filter((step) => step.type === "model_output")
+    .flatMap((step) => step.content || [])
+    .filter((content) => content.type === "text")
+    .map((content) => content.text || "")
+    .join("");
+}
+
 async function generateWithGemini(body: GenerateBody, count: number, answerCount: number, bloom: BloomLevel[]) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
@@ -85,51 +103,75 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
     allSourceFiles.length ? `Tệp đính kèm: ${allSourceFiles.map((file) => file.name).join(", ")}.` : "",
     'Chỉ trả về JSON: {"questions":[{"prompt":"...","level":"Nhận biết","options":["...","..."],"correctOptionId":"A"}]}',
   ].filter(Boolean).join("\n\n");
-  const parts: Array<Record<string, unknown>> = [{ text: userPrompt }];
+  const input: Array<Record<string, unknown>> = [{ type: "text", text: userPrompt }];
 
   for (const sf of allSourceFiles) {
     if (sf.data && sf.mimeType) {
-      parts.push({ inlineData: { mimeType: sf.mimeType, data: sf.data } });
+      input.push({
+        type: sf.mimeType === "application/pdf" ? "document" : "image",
+        data: sf.data,
+        mime_type: sf.mimeType,
+      });
     }
   }
 
-  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-  const candidateModels = [primaryModel, "gemini-3.5-flash", "gemini-2.5-flash"].filter(
-    (m, idx, arr) => arr.indexOf(m) === idx
-  );
-
-  const payload = JSON.stringify({
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    contents: [{ role: "user", parts }],
-    generationConfig: { responseMimeType: "application/json", temperature: 0.15 },
-  });
+  const candidateModels = getGeminiModelCandidates();
+  const responseSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      questions: {
+        type: "array",
+        minItems: Math.ceil(count * 0.6),
+        maxItems: count,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            prompt: { type: "string" },
+            level: { type: "string", enum: bloom },
+            options: { type: "array", minItems: answerCount, maxItems: answerCount, items: { type: "string" } },
+            correctOptionId: { type: "string", enum: letters.slice(0, answerCount) },
+          },
+          required: ["prompt", "level", "options", "correctOptionId"],
+        },
+      },
+    },
+    required: ["questions"],
+  };
 
   let lastErrorMessage = "";
 
   for (const model of candidateModels) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     try {
-      const response = await fetch(url, {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: payload,
+        body: JSON.stringify({
+          model,
+          input,
+          system_instruction: systemInstruction,
+          response_format: { type: "text", mime_type: "application/json", schema: responseSchema },
+          generation_config: { temperature: 0.15, thinking_level: "low", max_output_tokens: 8192 },
+          store: false,
+        }),
         signal: AbortSignal.timeout(60_000),
       });
       const data = await response.json() as {
         error?: { message?: string; code?: number };
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        status?: string;
+        steps?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
       };
 
       if (!response.ok) {
         lastErrorMessage = data.error?.message || `Lỗi từ model ${model}`;
-        if (response.status === 429 || response.status === 503 || /quota|rate limit|exhausted|demand/i.test(lastErrorMessage)) {
-          console.warn(`Model ${model} chạm giới hạn hoặc bận, đang chuyển sang model dự phòng...`);
-          continue;
-        }
-        throw new Error(lastErrorMessage);
+        console.warn(`Model ${model} chưa sẵn sàng, đang chuyển sang model Gemini 3 dự phòng...`);
+        continue;
       }
 
-      const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+      if (data.status && data.status !== "completed") throw new Error(`Gemini kết thúc với trạng thái ${data.status}.`);
+      const text = extractInteractionText(data);
+      if (!text) throw new Error("Gemini không trả về nội dung câu hỏi.");
       const cleaned = extractJson(text);
       const parsed = JSON.parse(cleaned) as { questions?: unknown };
       const questions = normalizeQuestions(parsed.questions, count, answerCount, bloom);

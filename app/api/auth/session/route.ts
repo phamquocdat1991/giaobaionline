@@ -3,6 +3,7 @@ import {
   createTeacherSessionCookie,
   expiredTeacherSessionCookie,
   getTeacherSession,
+  isGoogleAuthConfigured,
   isTeacherAuthConfigured,
   verifyTeacherAccessCode,
 } from "@/lib/auth";
@@ -14,11 +15,16 @@ export async function GET(request: Request) {
   return Response.json({
     authenticated: Boolean(session),
     email: session?.email || null,
-    authConfigured: isTeacherAuthConfigured() || session?.source === "platform",
+    authConfigured: isGoogleAuthConfigured() || isTeacherAuthConfigured() || session?.source === "platform",
+    googleConfigured: isGoogleAuthConfigured(),
+    legacyConfigured: isTeacherAuthConfigured(),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
+  if (isGoogleAuthConfigured()) {
+    return Response.json({ error: "Hệ thống đã bật đăng nhập Google. Vui lòng dùng nút Đăng nhập bằng Google." }, { status: 409 });
+  }
   const body = await request.json() as { email?: string; accessCode?: string };
   const email = body.email?.trim().toLowerCase() || "";
   if (!emailPattern.test(email)) {

@@ -1,6 +1,6 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { quizzes } from "@/db/schema";
+import { classrooms, quizzes } from "@/db/schema";
 import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
 import { validateQuestions } from "@/lib/quiz-validation";
 
@@ -12,10 +12,11 @@ const mapQuiz = (row: typeof quizzes.$inferSelect) => ({
 });
 
 export async function GET(request: Request) {
-  if (!(await requireTeacher(request))) return unauthorizedResponse();
+  const session = await requireTeacher(request);
+  if (!session) return unauthorizedResponse();
   try {
     const db = await getDb();
-    const rows = await db.select().from(quizzes).orderBy(desc(quizzes.createdAt));
+    const rows = await db.select().from(quizzes).where(eq(quizzes.teacherEmail, session.email)).orderBy(desc(quizzes.createdAt));
     return Response.json({ quizzes: rows.map(mapQuiz) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Không thể tải bài tập." }, { status: 500 });
@@ -23,7 +24,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!(await requireTeacher(request))) return unauthorizedResponse();
+  const session = await requireTeacher(request);
+  if (!session) return unauthorizedResponse();
   try {
     const body = await request.json() as Record<string, unknown>;
     const title = String(body.title || "").trim();
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
       bloomJson: JSON.stringify(body.bloom || []),
       questionsJson: JSON.stringify(validation.questions),
       assignedClassId: body.assignedClassId ? String(body.assignedClassId) : null,
-      teacherEmail: String(body.teacherEmail || "giaovien@example.com"),
+      teacherEmail: session.email,
       status: String(body.status || "draft"),
       deadline: deadline ? deadline.toISOString() : null,
       timeLimitMinutes: body.timeLimitMinutes ? Math.max(1, Math.min(240, Number(body.timeLimitMinutes))) : null,
@@ -53,6 +55,17 @@ export async function POST(request: Request) {
       updatedAt: new Date().toISOString(),
     };
     const db = await getDb();
+    const [existing] = await db.select({ teacherEmail: quizzes.teacherEmail }).from(quizzes).where(eq(quizzes.id, id)).limit(1);
+    if (existing && existing.teacherEmail !== session.email) {
+      return Response.json({ error: "Bạn không có quyền sửa bài tập này." }, { status: 403 });
+    }
+    if (value.assignedClassId) {
+      const [ownedClass] = await db.select({ id: classrooms.id }).from(classrooms).where(and(
+        eq(classrooms.id, value.assignedClassId),
+        eq(classrooms.ownerEmail, session.email),
+      )).limit(1);
+      if (!ownedClass) return Response.json({ error: "Lớp được chọn không thuộc tài khoản của bạn." }, { status: 403 });
+    }
     await db.insert(quizzes).values(value).onConflictDoUpdate({
       target: quizzes.id,
       set: {

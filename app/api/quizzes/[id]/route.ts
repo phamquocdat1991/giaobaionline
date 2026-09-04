@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { quizzes } from "@/db/schema";
 import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
@@ -19,9 +19,10 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await requireTeacher(request))) return unauthorizedResponse();
+  const session = await requireTeacher(request);
+  if (!session) return unauthorizedResponse();
   const { id } = await params;
   const db = await getDb();
-  await db.delete(quizzes).where(eq(quizzes.id, id));
+  await db.delete(quizzes).where(and(eq(quizzes.id, id), eq(quizzes.teacherEmail, session.email)));
   return Response.json({ ok: true });
 }

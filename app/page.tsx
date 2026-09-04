@@ -53,6 +53,7 @@ export default function Home() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [teacherEmail, setTeacherEmail] = useState("giaovien@eduquiz.vn");
+  const [googleConfigured, setGoogleConfigured] = useState(false);
   const [syncState, setSyncState] = useState<"checking" | "ready" | "error">("checking");
   const [services, setServices] = useState<ServiceStatus | null>(null);
 
@@ -60,6 +61,7 @@ export default function Home() {
     fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
       const data = await response.json();
       setIsLoggedIn(Boolean(data.authenticated));
+      setGoogleConfigured(Boolean(data.googleConfigured));
       if (data.email) setTeacherEmail(data.email);
     }).catch(() => setIsLoggedIn(false));
   }, []);
@@ -112,7 +114,7 @@ export default function Home() {
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [isLoggedIn, loadData]);
   if (isLoggedIn === null) return <div className="student-loading"><span><BrainCircuit /></span><h1>EduQuiz AI</h1><p>Đang tải...</p></div>;
-  if (!isLoggedIn) return <LoginPage onLogin={handleLogin} />;
+  if (!isLoggedIn) return <LoginPage googleConfigured={googleConfigured} onLogin={handleLogin} />;
 
   return <div className="app-shell">
     <header className="topbar">
@@ -319,10 +321,23 @@ function Stat({ label, value, suffix, tone, icon, badge }: { label: string; valu
 function SubmissionTable({ rows, quizzes }: { rows: Submission[]; quizzes: Quiz[] }) { return rows.length ? <div className="data-table"><Table><TableHeader><TableRow><TableHead>Học sinh</TableHead><TableHead>Mã HS</TableHead><TableHead>Lớp</TableHead><TableHead>Bài tập</TableHead><TableHead>Điểm</TableHead><TableHead>Thời gian</TableHead><TableHead>Lượt</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell className="font-semibold">{row.studentName}</TableCell><TableCell>{row.studentCode || "—"}</TableCell><TableCell>{row.className}</TableCell><TableCell>{quizzes.find((quiz) => quiz.id === row.quizId)?.title || "Bài tập"}</TableCell><TableCell><span className="score-chip">{row.score}/10</span></TableCell><TableCell>{formatDuration(row.durationSeconds)}</TableCell><TableCell>Lần {row.attemptNumber}/3</TableCell></TableRow>)}</TableBody></Table></div> : <div className="table-empty"><span><History /></span><h3>Chưa có học sinh nào nộp bài</h3><p>Kết quả sẽ tự động xuất hiện tại đây sau khi học sinh nhấn “Nộp bài”.</p></div>; }
 function StudentStatusTable({ mode, classroom, submissions, done, pending }: { mode: string; classroom?: Classroom; submissions: Submission[]; done: Student[]; pending: Student[] }) { if (!classroom) return <div className="table-empty"><h3>Chưa có danh sách lớp</h3></div>; const students = mode === "done" ? done : mode === "pending" ? pending : classroom.students; if (!students.length) return <div className="table-empty"><span>{mode === "done" ? <CheckCircle2 /> : <Users />}</span><h3>{mode === "done" ? "Chưa có học sinh hoàn thành bài" : "Tất cả học sinh đã hoàn thành"}</h3></div>; return <div className="data-table"><Table><TableHeader><TableRow><TableHead>Mã học sinh</TableHead><TableHead>Họ và tên</TableHead><TableHead>Lớp</TableHead>{mode === "pending" ? <TableHead>Liên hệ</TableHead> : <><TableHead>Số lượt nộp</TableHead><TableHead>Điểm trung bình</TableHead></>}</TableRow></TableHeader><TableBody>{students.map((student) => { const rows = submissions.filter((item) => item.studentCode === student.code || normalize(item.studentName) === normalize(student.name)); const average = rows.length ? rows.reduce((sum, item) => sum + item.score, 0) / rows.length : 0; return <TableRow key={student.id}><TableCell><b className="student-code">{student.code}</b></TableCell><TableCell className="font-semibold">{student.name}</TableCell><TableCell>{classroom.name}</TableCell>{mode === "pending" ? <TableCell><span className="pending-chip">{student.email || student.zaloUserId ? "Sẵn sàng nhắc" : "Thiếu liên hệ"}</span></TableCell> : <><TableCell><span className="done-chip">{rows.length}/3 lượt</span></TableCell><TableCell>{rows.length ? `${average.toFixed(1)}/10` : "—"}</TableCell></>}</TableRow>; })}</TableBody></Table></div>; }
 
-function LoginPage({ onLogin }: { onLogin: (email: string, accessCode: string) => Promise<string | null> }) {
+function LoginPage({ googleConfigured, onLogin }: { googleConfigured: boolean; onLogin: (email: string, accessCode: string) => Promise<string | null> }) {
   const [email, setEmail] = useState("");
   const [accessCode, setAccessCode] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get("auth_error");
+    if (!error) return;
+    const message = error === "cancelled"
+      ? "Bạn đã hủy đăng nhập Google."
+      : error === "not_configured"
+        ? "Đăng nhập Google chưa được cấu hình đầy đủ."
+        : "Đăng nhập Google không thành công. Vui lòng thử lại.";
+    const timer = window.setTimeout(() => toast.error(message), 0);
+    window.history.replaceState({}, "", window.location.pathname);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -343,16 +358,26 @@ function LoginPage({ onLogin }: { onLogin: (email: string, accessCode: string) =
         <h1 className="login-title">Đăng nhập EduQuiz AI</h1>
         <p className="login-desc">Quản lý lớp học, tạo đề thi bằng AI và theo dõi kết quả học sinh theo thời gian thực.</p>
 
-        <form onSubmit={handleSubmit} className="login-form">
-          <label className="login-field-label" htmlFor="teacher-email"><Mail size={14} /> Email giáo viên</label>
-          <Input id="teacher-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="giaovien@truong.edu.vn" autoComplete="email" autoFocus className="login-input" />
-          <label className="login-field-label" htmlFor="teacher-code"><KeyRound size={14} /> Mã truy cập</label>
-          <Input id="teacher-code" type="password" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} placeholder="Mã do quản trị viên cấp" autoComplete="current-password" className="login-input" />
-          <Button type="submit" className="login-submit" disabled={loading}>
-            {loading ? <LoaderCircle className="spin" size={18} /> : <Shield size={18} />}
-            {loading ? "Đang xác thực..." : "Đăng nhập an toàn"}
-          </Button>
-        </form>
+        {googleConfigured ? (
+          <div className="login-google-section">
+            <a className="google-signin-btn" href="/api/auth/google/start">
+              <span className="g-icon-lg" aria-hidden="true">G</span>
+              Đăng nhập bằng Google
+            </a>
+            <p className="login-google-note">EduQuiz chỉ dùng email đã được Google xác minh để nhận diện tài khoản và bảo vệ dữ liệu của bạn.</p>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="login-form">
+            <label className="login-field-label" htmlFor="teacher-email"><Mail size={14} /> Email giáo viên</label>
+            <Input id="teacher-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="giaovien@truong.edu.vn" autoComplete="email" autoFocus className="login-input" />
+            <label className="login-field-label" htmlFor="teacher-code"><KeyRound size={14} /> Mã truy cập</label>
+            <Input id="teacher-code" type="password" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} placeholder="Mã do quản trị viên cấp" autoComplete="current-password" className="login-input" />
+            <Button type="submit" className="login-submit" disabled={loading}>
+              {loading ? <LoaderCircle className="spin" size={18} /> : <Shield size={18} />}
+              {loading ? "Đang xác thực..." : "Đăng nhập an toàn"}
+            </Button>
+          </form>
+        )}
 
         <div className="login-features">
           <div><Cloud size={16} /><span>Đồng bộ đề thi tự động trên <strong>Database Cloud</strong></span></div>
