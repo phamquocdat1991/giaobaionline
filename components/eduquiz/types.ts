@@ -35,6 +35,9 @@ export type Quiz = {
   createdAt: string;
 };
 
+export type StudentQuestion = Omit<Question, "correctOptionId">;
+export type StudentQuiz = Omit<Quiz, "questions"> & { questions: StudentQuestion[] };
+
 export type Classroom = {
   id: string;
   code: string;
@@ -56,6 +59,7 @@ export type Submission = {
   durationSeconds: number;
   attemptNumber: number;
   answers: Record<string, string>;
+  answerKey?: Record<string, string>;
   createdAt: string;
   notifications?: { email: boolean; zalo: boolean };
 };

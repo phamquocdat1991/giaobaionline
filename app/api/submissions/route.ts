@@ -4,10 +4,12 @@ import { classrooms, quizzes, submissions } from "@/db/schema";
 import type { Question, Student } from "@/components/eduquiz/types";
 import { mapClassroom, normalizeCode } from "@/lib/roster";
 import { notifyStudent } from "@/lib/notifications";
+import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
 
 const mapSubmission = (row: typeof submissions.$inferSelect) => ({ ...row, answers: JSON.parse(row.answersJson) });
 
 export async function GET(request: Request) {
+  if (!(await requireTeacher(request))) return unauthorizedResponse();
   try {
     const quizId = new URL(request.url).searchParams.get("quizId");
     const db = await getDb();
@@ -94,7 +96,8 @@ export async function POST(request: Request) {
       `Lượt làm: ${attemptNumber}/${maxAttempts}.`,
     ].join("\n");
     const notifications = await notifyStudent(student, `Kết quả EduQuiz: ${quiz.title}`, message);
-    return Response.json({ submission: { ...value, answers, notifications } }, { status: 201 });
+    const answerKey = Object.fromEntries(questions.map((question) => [question.id, question.correctOptionId]));
+    return Response.json({ submission: { ...value, answers, answerKey, notifications } }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Không thể nộp bài." }, { status: 500 });
   }

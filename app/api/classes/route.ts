@@ -3,8 +3,10 @@ import { getDb } from "@/db";
 import { classrooms } from "@/db/schema";
 import type { Student } from "@/components/eduquiz/types";
 import { fallbackClassCode, mapClassroom, normalizeCode, parseStudents } from "@/lib/roster";
+import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!(await requireTeacher(request))) return unauthorizedResponse();
   try {
     const db = await getDb();
     const rows = await db.select().from(classrooms).orderBy(asc(classrooms.name));
@@ -15,6 +17,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!(await requireTeacher(request))) return unauthorizedResponse();
   try {
     const body = await request.json() as { id?: string; code?: string; name?: string; students?: Student[] };
     const name = body.name?.trim();
@@ -25,6 +28,13 @@ export async function POST(request: Request) {
     }
     if (new Set(students.map((student) => student.code)).size !== students.length) {
       return Response.json({ error: "Mã học sinh trong cùng lớp không được trùng nhau." }, { status: 400 });
+    }
+    if (students.length > 200) {
+      return Response.json({ error: "Mỗi lớp tối đa 200 học sinh." }, { status: 400 });
+    }
+    const invalidEmail = students.find((student) => student.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(student.email));
+    if (invalidEmail) {
+      return Response.json({ error: `Email của học sinh ${invalidEmail.name} không hợp lệ.` }, { status: 400 });
     }
 
     const db = await getDb();
@@ -47,6 +57,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (!(await requireTeacher(request))) return unauthorizedResponse();
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return Response.json({ error: "Thiếu mã lớp." }, { status: 400 });
   const db = await getDb();

@@ -3,8 +3,10 @@ import { getDb } from "@/db";
 import { classrooms, quizzes, submissions } from "@/db/schema";
 import { mapClassroom } from "@/lib/roster";
 import { notifyStudent } from "@/lib/notifications";
+import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  if (!(await requireTeacher(request))) return unauthorizedResponse();
   try {
     const body = await request.json() as { classId?: string; quizId?: string };
     if (!body.classId || !body.quizId) {

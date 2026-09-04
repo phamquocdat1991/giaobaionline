@@ -56,6 +56,55 @@ test("roster normalization handles Vietnamese accents and formatting", async () 
   assert.equal(students[1].name, "Trần Thị Bình");
 });
 
+test("quiz preflight rejects blank and duplicate answer options", async () => {
+  const { validateQuestions } = await vite.ssrLoadModule("/lib/quiz-validation.ts");
+  const result = validateQuestions([
+    {
+      id: "q1",
+      prompt: "Câu hỏi hợp lệ?",
+      level: "Nhận biết",
+      options: [{ id: "A", text: "Giống nhau" }, { id: "B", text: " giống nhau " }],
+      correctOptionId: "C",
+    },
+  ]);
+  assert.ok(result.errors.some((message) => message.includes("trùng nội dung")));
+  assert.ok(result.errors.some((message) => message.includes("đáp án đúng")));
+});
+
+test("fallback generator fulfills the requested count without repeating questions", async () => {
+  const { buildQuestions } = await vite.ssrLoadModule("/components/eduquiz/question-bank.ts");
+  const questions = buildQuestions({
+    topic: "Chủ đề thử nghiệm",
+    sourceText: "",
+    count: 20,
+    answerCount: 4,
+    selectedBloom: ["Nhận biết", "Thông hiểu"],
+  });
+  assert.equal(new Set(questions.map((question) => question.prompt)).size, questions.length);
+  assert.equal(questions.length, 20);
+});
+
+test("teacher APIs require a server-verified session", async () => {
+  const { GET } = await vite.ssrLoadModule("/app/api/classes/route.ts");
+  const unauthorized = await GET(new Request("http://localhost/api/classes"));
+  assert.equal(unauthorized.status, 401);
+
+  const authorized = await GET(new Request("http://localhost/api/classes", {
+    headers: { "oai-authenticated-user-email": "teacher@example.com" },
+  }));
+  assert.equal(authorized.status, 200);
+
+  process.env.VERCEL = "1";
+  try {
+    const spoofed = await GET(new Request("http://localhost/api/classes", {
+      headers: { "oai-authenticated-user-email": "attacker@example.com" },
+    }));
+    assert.equal(spoofed.status, 401, "Vercel must not trust a client-supplied Sites identity header");
+  } finally {
+    delete process.env.VERCEL;
+  }
+});
+
 test("database auto-initializes local SQLite and performs CRUD operations", async () => {
   const { getDb } = await vite.ssrLoadModule("/db/index.ts");
   const { classrooms, quizzes, submissions } = await vite.ssrLoadModule("/db/schema.ts");
@@ -103,6 +152,15 @@ test("database auto-initializes local SQLite and performs CRUD operations", asyn
   const [savedQuiz] = await db.select().from(quizzes).where(eq(quizzes.id, testQuizId)).limit(1);
   assert.equal(savedQuiz.title, "Bài kiểm tra Toán học thử nghiệm");
   assert.equal(savedQuiz.maxAttempts, 3);
+
+  const { GET: getPublicQuiz } = await vite.ssrLoadModule("/app/api/quizzes/[id]/route.ts");
+  const publicResponse = await getPublicQuiz(
+    new Request(`http://localhost/api/quizzes/${testQuizId}`),
+    { params: Promise.resolve({ id: testQuizId }) },
+  );
+  const publicQuiz = await publicResponse.json();
+  assert.equal(publicResponse.status, 200);
+  assert.equal("correctOptionId" in publicQuiz.quiz.questions[0], false, "Public quiz must not expose its answer key");
 
   // Test Attempt 1
   const sub1Id = `sub-1-${Date.now()}`;

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
-import { BellRing, BookOpen, BrainCircuit, CalendarClock, Check, CheckCircle2, ChevronRight, ClipboardCopy, Clock3, Cloud, Download, FileSpreadsheet, FileText, GraduationCap, History, KeyRound, LayoutDashboard, Link2, LoaderCircle, LogOut, Mail, Pencil, QrCode, RefreshCw, Send, Shield, Sparkles, Timer, Trash2, UploadCloud, Users, X, XCircle } from "lucide-react";
+import { BellRing, BookOpen, BrainCircuit, CalendarClock, Check, CheckCircle2, ChevronRight, ClipboardCopy, Clock3, Cloud, Download, FileSpreadsheet, FileText, GraduationCap, History, KeyRound, LayoutDashboard, Link2, LoaderCircle, LogOut, Mail, Pencil, Printer, QrCode, RefreshCw, Send, Shield, Sparkles, Timer, Trash2, UploadCloud, Users, Wifi, WifiOff, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BloomLevel, Classroom, Question, Quiz, Student, Submission } from "@/components/eduquiz/types";
+import { validateQuizPreflight } from "@/lib/quiz-validation";
 
 const demoNames = ["Mai Bảo An", "Triệu Văn An", "Mai Văn Gia Bảo", "Ma Văn Công", "Ma Văn Cường", "Nguyễn Minh Duy", "Hoàng Gia Hân", "Lê Thu Hằng", "Trần Minh Hiếu", "Phạm Quang Huy", "Nguyễn Ngọc Lan", "Đỗ Hoàng Long", "Vũ Khánh Linh", "Trần Gia Minh", "Đặng Tuấn Nam", "Nguyễn Phương", "Hoàng Thị Quỳnh", "Lê Minh Sơn", "Trần Thanh Tâm", "Phạm Anh Thư", "Nguyễn Minh Trang", "Vũ Đức Trung", "Lê Hải Yến", "Đỗ Minh Anh", "Phạm Tuấn Anh", "Nguyễn Quốc Bảo", "Trần Ngọc Hà", "Lê Hoàng Nam", "Vũ Phương Thảo", "Đỗ Thanh Vân", "Nguyễn Bảo Vy"];
 const demoStudents: Student[] = demoNames.map((name, index) => ({ id: `demo-${index + 1}`, code: `7A${String(index + 1).padStart(3, "0")}`, name }));
@@ -33,7 +34,15 @@ const subjects = [
 
 function normalize(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " "); }
 function formatDuration(seconds: number) { return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`; }
+function createClientId() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `id-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
 type UploadedSource = { name: string; mimeType: string; data: string };
+type SourceItem = { name: string; mimeType: string; size: number; text?: string; data?: string };
+type ServiceStatus = { database: "ready" | "error"; aiConfigured: boolean; emailConfigured: boolean; zaloConfigured: boolean };
 const MAX_FILES = 5;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 
@@ -44,34 +53,64 @@ export default function Home() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [teacherEmail, setTeacherEmail] = useState("giaovien@eduquiz.vn");
+  const [syncState, setSyncState] = useState<"checking" | "ready" | "error">("checking");
+  const [services, setServices] = useState<ServiceStatus | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("eduquiz_teacher_email");
-    if (saved) { setTeacherEmail(saved); setIsLoggedIn(true); } else { setIsLoggedIn(false); }
+    fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
+      const data = await response.json();
+      setIsLoggedIn(Boolean(data.authenticated));
+      if (data.email) setTeacherEmail(data.email);
+    }).catch(() => setIsLoggedIn(false));
   }, []);
 
-  function handleLogin(email: string) {
-    localStorage.setItem("eduquiz_teacher_email", email);
-    setTeacherEmail(email);
+  async function handleLogin(email: string, accessCode: string) {
+    const response = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, accessCode }),
+    });
+    const data = await response.json();
+    if (!response.ok) return data.error || "Không thể đăng nhập.";
+    setTeacherEmail(data.email);
     setIsLoggedIn(true);
+    return null;
   }
 
-  function handleLogout() {
-    localStorage.removeItem("eduquiz_teacher_email");
+  async function handleLogout() {
+    await fetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
     setIsLoggedIn(false);
     setTeacherEmail("giaovien@eduquiz.vn");
   }
 
-  async function loadData(showToast = false) {
+  const loadData = useCallback(async (showToast = false) => {
+    setSyncState("checking");
     try {
-      const [classRes, quizRes, submissionRes] = await Promise.all([fetch("/api/classes"), fetch("/api/quizzes"), fetch("/api/submissions")]);
-      if (classRes.ok) { const data = await classRes.json(); if (Array.isArray(data.classes)) setClasses(data.classes); }
-      if (quizRes.ok) setQuizzes((await quizRes.json()).quizzes || []);
-      if (submissionRes.ok) setSubmissions((await submissionRes.json()).submissions || []);
+      const [classRes, quizRes, submissionRes, statusRes] = await Promise.all([fetch("/api/classes"), fetch("/api/quizzes"), fetch("/api/submissions"), fetch("/api/status")]);
+      const responses = [classRes, quizRes, submissionRes, statusRes];
+      const payloads = await Promise.all(responses.map((response) => response.json()));
+      const failedIndex = responses.findIndex((response) => !response.ok);
+      if (failedIndex >= 0) {
+        if (responses[failedIndex].status === 401) setIsLoggedIn(false);
+        throw new Error(payloads[failedIndex]?.error || "Không thể đồng bộ dữ liệu.");
+      }
+      setClasses(Array.isArray(payloads[0].classes) ? payloads[0].classes : []);
+      setQuizzes(Array.isArray(payloads[1].quizzes) ? payloads[1].quizzes : []);
+      setSubmissions(Array.isArray(payloads[2].submissions) ? payloads[2].submissions : []);
+      setServices(payloads[3]);
+      setSyncState("ready");
       if (showToast) toast.success("Dữ liệu đã được đồng bộ.");
-    } catch { if (showToast) toast.error("Chưa thể đồng bộ. Vui lòng thử lại."); }
-  }
-  useEffect(() => { const initial = window.setTimeout(() => void loadData(), 0); const timer = window.setInterval(() => void loadData(), 7000); return () => { window.clearTimeout(initial); window.clearInterval(timer); }; }, []);
+    } catch (error) {
+      setSyncState("error");
+      if (showToast) toast.error(error instanceof Error ? error.message : "Chưa thể đồng bộ. Vui lòng thử lại.");
+    }
+  }, []);
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const initial = window.setTimeout(() => void loadData(), 0);
+    const timer = window.setInterval(() => void loadData(), 15000);
+    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
+  }, [isLoggedIn, loadData]);
   if (isLoggedIn === null) return <div className="student-loading"><span><BrainCircuit /></span><h1>EduQuiz AI</h1><p>Đang tải...</p></div>;
   if (!isLoggedIn) return <LoginPage onLogin={handleLogin} />;
 
@@ -79,76 +118,79 @@ export default function Home() {
     <header className="topbar">
       <button className="brand" onClick={() => setSection("builder")} aria-label="Về trang tạo đề"><span className="brand-mark"><BrainCircuit size={22} /></span><span><strong>EduQuiz</strong><small>AI CLASSROOM</small></span></button>
       <nav className="primary-nav" aria-label="Điều hướng chính"><button className={section === "builder" ? "active" : ""} onClick={() => setSection("builder")}><Sparkles size={17} /> Tạo đề AI</button><button className={section === "manager" ? "active" : ""} onClick={() => setSection("manager")}><LayoutDashboard size={17} /> Quản lý học sinh</button></nav>
-      <div className="topbar-actions"><span className="realtime"><span /> Đồng bộ Realtime</span><label className="email-pill"><Mail size={15} /><input value={teacherEmail} onChange={(e) => setTeacherEmail(e.target.value)} aria-label="Gmail giáo viên" /></label><button className="logout-btn" onClick={handleLogout} title="Đăng xuất"><LogOut size={16} /></button></div>
+      <div className="topbar-actions"><span className={`realtime ${syncState}`}>{syncState === "error" ? <WifiOff /> : <Wifi />} {syncState === "checking" ? "Đang đồng bộ" : syncState === "ready" ? "Dữ liệu đã kết nối" : "Mất kết nối dữ liệu"}</span><span className="email-pill"><Mail size={15} />{teacherEmail}</span><button className="logout-btn" onClick={() => void handleLogout()} title="Đăng xuất"><LogOut size={16} /></button></div>
     </header>
-    {section === "builder" ? <QuizBuilder classes={classes} teacherEmail={teacherEmail} onSaved={(quiz) => setQuizzes((current) => [quiz, ...current.filter((item) => item.id !== quiz.id)])} /> : <ClassManager classes={classes} setClasses={setClasses} quizzes={quizzes} submissions={submissions} onRefresh={() => loadData(true)} />}
+    {section === "builder" ? <QuizBuilder classes={classes} teacherEmail={teacherEmail} aiConfigured={services?.aiConfigured ?? false} onSaved={(quiz) => setQuizzes((current) => [quiz, ...current.filter((item) => item.id !== quiz.id)])} /> : <ClassManager classes={classes} setClasses={setClasses} quizzes={quizzes} submissions={submissions} onRefresh={() => loadData(true)} />}
     <Toaster position="top-right" richColors />
   </div>;
 }
 
-function QuizBuilder({ classes, teacherEmail, onSaved }: { classes: Classroom[]; teacherEmail: string; onSaved: (quiz: Quiz) => void }) {
+function QuizBuilder({ classes, teacherEmail, aiConfigured, onSaved }: { classes: Classroom[]; teacherEmail: string; aiConfigured: boolean; onSaved: (quiz: Quiz) => void }) {
   const [educationLevel, setEducationLevel] = useState("THCS"); const [grade, setGrade] = useState("Lớp 7"); const [subject, setSubject] = useState("Ngữ văn");
   const [questionCount, setQuestionCount] = useState(10); const [answerCount, setAnswerCount] = useState(4);
   const [selectedBloom, setSelectedBloom] = useState<BloomLevel[]>(["Nhận biết", "Thông hiểu", "Vận dụng thấp"]);
   const [topic, setTopic] = useState("Bầy chim chìa vôi"); const [sourceMode, setSourceMode] = useState<"file" | "text">("file"); const [sourceText, setSourceText] = useState("");
-  const [fileNames, setFileNames] = useState<string[]>([]); const [sourceFiles, setSourceFiles] = useState<UploadedSource[]>([]);
+  const [sourceItems, setSourceItems] = useState<SourceItem[]>([]);
   const [isDragging, setIsDragging] = useState(false); const dropRef = useRef<HTMLLabelElement>(null);
   const [deadline, setDeadline] = useState(""); const [timeLimitMinutes, setTimeLimitMinutes] = useState(45);
   const [questions, setQuestions] = useState<Question[]>([]); const [generating, setGenerating] = useState(false); const [quizId, setQuizId] = useState("");
   const [assignedClassId, setAssignedClassId] = useState(classes[0]?.id || ""); const [shareOpen, setShareOpen] = useState(false); const [editIndex, setEditIndex] = useState<number | null>(null); const [qrData, setQrData] = useState("");
+  const fileNames = sourceItems.map((item) => item.name);
+  const sourceFiles: UploadedSource[] = sourceItems.filter((item) => item.data).map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data! }));
+  const extractedSourceText = sourceItems.filter((item) => item.text).map((item) => `--- ${item.name} ---\n${item.text}`).join("\n\n");
   const shareUrl = typeof window !== "undefined" && quizId ? `${window.location.origin}/bai-lam/${quizId}` : "";
   useEffect(() => { if (shareOpen && shareUrl) QRCode.toDataURL(shareUrl, { width: 260, margin: 1, color: { dark: "#1f285a", light: "#ffffff" } }).then(setQrData); }, [shareOpen, shareUrl]);
   function toggleBloom(level: BloomLevel) { setSelectedBloom((current) => current.includes(level) ? current.filter((item) => item !== level) : [...current, level]); }
 
-  async function processOneFile(file: File): Promise<{ text: string; binary: UploadedSource | null }> {
+  async function processOneFile(file: File): Promise<SourceItem> {
     const extension = file.name.split(".").pop()?.toLowerCase();
-    if (extension === "txt") { return { text: await file.text(), binary: null }; }
-    if (extension === "docx") { const mammoth = await import("mammoth"); const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() }); return { text: result.value, binary: null }; }
+    if (extension === "txt") return { name: file.name, mimeType: file.type || "text/plain", size: file.size, text: await file.text() };
+    if (extension === "docx") { const mammoth = await import("mammoth"); const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() }); return { name: file.name, mimeType: file.type, size: file.size, text: result.value }; }
     if (extension === "doc") { throw new Error(`Định dạng .doc cũ chưa được hỗ trợ: ${file.name}`); }
     if (file.type === "application/pdf" || file.type.startsWith("image/")) {
       const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
-      return { text: "", binary: { name: file.name, mimeType: file.type, data: dataUrl.split(",")[1] || "" } };
+      return { name: file.name, mimeType: file.type, size: file.size, data: dataUrl.split(",")[1] || "" };
     }
     throw new Error(`Định dạng không hỗ trợ: ${file.name}`);
   }
 
   async function handleSourceFiles(fileList: FileList) {
-    const files = Array.from(fileList).slice(0, MAX_FILES);
+    const existingNames = new Set(sourceItems.map((item) => item.name));
+    const files = Array.from(fileList).filter((file) => !existingNames.has(file.name)).slice(0, Math.max(0, MAX_FILES - sourceItems.length));
     if (!files.length) return;
-    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    const totalSize = sourceItems.reduce((sum, item) => sum + item.size, 0) + files.reduce((sum, file) => sum + file.size, 0);
     if (totalSize > MAX_TOTAL_BYTES) return toast.error(`Tổng dung lượng vượt quá 20 MB. Vui lòng chọn ít file hơn.`);
     const oversized = files.find((f) => f.size > 8 * 1024 * 1024);
     if (oversized) return toast.error(`Tệp "${oversized.name}" quá lớn. Mỗi tệp tối đa 8 MB.`);
-    const names: string[] = []; let combinedText = ""; const binaries: UploadedSource[] = [];
+    const processed: SourceItem[] = [];
     let errored = 0;
     for (const file of files) {
       try {
         const result = await processOneFile(file);
-        names.push(file.name);
-        if (result.text) combinedText += (combinedText ? "\n\n--- " + file.name + " ---\n" : "") + result.text;
-        if (result.binary) binaries.push(result.binary);
+        processed.push(result);
       } catch (e) { errored++; toast.error(e instanceof Error ? e.message : `Không đọc được ${file.name}.`); }
     }
-    if (names.length > 0) {
-      setFileNames(names); setSourceText(combinedText); setSourceFiles(binaries);
-      toast.success(`Đã tải ${names.length} tệp${errored ? ` (${errored} lỗi)` : ""}.`);
+    if (processed.length > 0) {
+      setSourceItems((current) => [...current, ...processed]);
+      toast.success(`Đã tải ${processed.length} tệp${errored ? ` (${errored} lỗi)` : ""}.`);
     }
   }
 
   function removeFile(index: number) {
-    setFileNames((prev) => prev.filter((_, i) => i !== index));
-    setSourceFiles((prev) => prev.filter((f) => !f.name.endsWith(fileNames[index] ?? "")));
-    if (fileNames.length <= 1) setSourceText("");
+    setSourceItems((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
   async function generateQuiz() {
-    if (!topic.trim() && !sourceText.trim() && !fileNames.length) return toast.error("Vui lòng nhập chủ đề hoặc chọn tài liệu nguồn.");
+    const effectiveSourceText = sourceMode === "text" ? sourceText : extractedSourceText;
+    if (!topic.trim() && !effectiveSourceText.trim() && !sourceFiles.length) return toast.error("Vui lòng nhập chủ đề hoặc chọn tài liệu nguồn.");
     if (!selectedBloom.length) return toast.error("Vui lòng chọn ít nhất một mức độ Bloom.");
     setGenerating(true); setQuestions([]);
-    try { const response = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic, subject, grade, sourceText, sourceFiles, count: questionCount, answerCount, selectedBloom }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); await new Promise((r) => setTimeout(r, 650)); setQuestions(data.questions); setQuizId(crypto.randomUUID()); toast.success(data.engine === "gemini" ? `AI đã tạo ${data.questions.length} câu hỏi từ tài liệu.` : `Đã tạo ${data.questions.length} câu hỏi. Cần cấu hình khóa Gemini để bật AI/OCR thật.`); }
+    try { const response = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic, subject, grade, sourceText: effectiveSourceText, sourceFiles, count: questionCount, answerCount, selectedBloom }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); await new Promise((r) => setTimeout(r, 350)); setQuestions(data.questions); setQuizId(createClientId()); toast.success(data.engine === "gemini" ? `AI đã tạo ${data.questions.length} câu hỏi.` : `Đã tạo ${data.questions.length} câu hỏi bằng bộ sinh dự phòng.`); }
     catch (error) { toast.error(error instanceof Error ? error.message : "Không thể tạo câu hỏi."); } finally { setGenerating(false); }
   }
   async function publishQuiz() {
-    if (!questions.length) return; const id = quizId || crypto.randomUUID(); setQuizId(id);
+    const errors = validateQuizPreflight({ title: topic || `${subject} ${grade}`, teacherEmail, deadline, questions });
+    if (errors.length) return toast.error(errors[0]);
+    const id = quizId || createClientId(); setQuizId(id);
     const payload = { id, title: topic || `${subject} ${grade}`, educationLevel, grade, subject, bloom: selectedBloom, questions, assignedClassId: assignedClassId || null, teacherEmail, status: "published", deadline: deadline ? new Date(deadline).toISOString() : null, timeLimitMinutes, maxAttempts: 3 };
     try { const response = await fetch("/api/quizzes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); onSaved(data.quiz); setShareOpen(true); }
     catch (error) { toast.error(error instanceof Error ? error.message : "Không thể phát hành bài tập."); }
@@ -168,7 +210,7 @@ function QuizBuilder({ classes, teacherEmail, onSaved }: { classes: Classroom[];
     }
   }
   return <main className="builder-page">
-    <section className="page-heading compact-heading"><div><span className="eyebrow"><Sparkles size={14} /> TẠO BÀI TẬP THÔNG MINH</span><h1>Tạo câu hỏi và giao bài trực tuyến</h1><p>Thiết lập cấu trúc đề, tải tài liệu và duyệt đáp án trước khi gửi cho học sinh.</p></div><span className="api-status"><CheckCircle2 size={15} /> Trợ lý AI sẵn sàng</span></section>
+    <section className="page-heading compact-heading"><div><span className="eyebrow"><Sparkles size={14} /> TẠO BÀI TẬP THÔNG MINH</span><h1>Tạo câu hỏi và giao bài trực tuyến</h1><p>Thiết lập cấu trúc đề, tải tài liệu và duyệt đáp án trước khi gửi cho học sinh.</p></div><span className={`api-status ${aiConfigured ? "" : "fallback"}`}>{aiConfigured ? <CheckCircle2 size={15} /> : <Cloud size={15} />} {aiConfigured ? "Gemini AI đã kết nối" : "Đang dùng bộ sinh dự phòng"}</span></section>
     <div className="builder-grid">
       <aside className="config-card"><div className="section-title"><span><BookOpen size={18} /></span><div><h2>Cấu hình Quiz</h2><p>Thông tin bài học và cấu trúc đề</p></div></div>
         <div className="form-grid three"><Field label="Cấp học"><NativeSelect className="w-full" value={educationLevel} onChange={(e) => { const value = e.target.value; setEducationLevel(value); setGrade(grades[value][0]); }}><NativeSelectOption>Tiểu học</NativeSelectOption><NativeSelectOption>THCS</NativeSelectOption><NativeSelectOption>THPT</NativeSelectOption></NativeSelect></Field><Field label="Lớp"><NativeSelect className="w-full" value={grade} onChange={(e) => setGrade(e.target.value)}>{grades[educationLevel].map((item) => <NativeSelectOption key={item}>{item}</NativeSelectOption>)}</NativeSelect></Field><Field label="Môn học"><NativeSelect className="w-full" value={subject} onChange={(e) => setSubject(e.target.value)}>{subjects.map((item) => <NativeSelectOption key={item}>{item}</NativeSelectOption>)}</NativeSelect></Field></div>
@@ -177,10 +219,10 @@ function QuizBuilder({ classes, teacherEmail, onSaved }: { classes: Classroom[];
         <div className="attempt-policy"><KeyRound /><span><strong>Giới hạn 3 lượt làm</strong><small>Hệ thống tự động khóa sau lần nộp thứ 3.</small></span></div>
         <div className="field-block"><label className="field-label">Mức độ nhận thức (Bloom)</label><div className="bloom-list">{bloomLevels.map((level) => <label key={level}><Checkbox checked={selectedBloom.includes(level)} onCheckedChange={() => toggleBloom(level)} /><span>{level}</span></label>)}</div></div>
         <Field label="Tên bài học / Chủ đề ôn tập" optional><Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="VD: Bài 3 – Sống cùng thiên nhiên..." /></Field>
-        <div className="field-block"><label className="field-label">Tài liệu nguồn</label><div className="segmented"><button className={sourceMode === "file" ? "active" : ""} onClick={() => setSourceMode("file")}>Tải file</button><button className={sourceMode === "text" ? "active" : ""} onClick={() => setSourceMode("text")}>Nhập văn bản</button></div>{sourceMode === "file" ? (<div className="dropzone-area">{fileNames.length > 0 && <div className="file-chips">{fileNames.map((name, idx) => <span key={name} className="file-chip"><span>{name}</span><button type="button" onClick={() => removeFile(idx)} aria-label={`Xóa ${name}`}><X size={12} /></button></span>)}</div>}<label ref={dropRef} className={`dropzone ${fileNames.length ? "has-file" : ""} ${isDragging ? "dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files.length) void handleSourceFiles(e.dataTransfer.files); }}><UploadCloud size={27} /><strong>{fileNames.length ? `${fileNames.length} tệp đã chọn · kéo thêm hoặc nhấn` : "Kéo thả file vào đây"}</strong><span>{fileNames.length ? `Tổng ${fileNames.length}/${MAX_FILES} tệp · nhấn để thêm` : "hoặc nhấn để chọn từ máy"}</span><small>PDF, DOCX, TXT, JPG, PNG · tối đa 5 tệp · mỗi tệp ≤ 8 MB</small><input type="file" multiple accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png" onChange={(e) => e.target.files && void handleSourceFiles(e.target.files)} /></label></div>) : <Textarea value={sourceText} onChange={(e) => setSourceText(e.target.value)} className="min-h-36" placeholder="Dán nội dung bài học hoặc tài liệu vào đây..." />}</div>
+        <div className="field-block"><label className="field-label">Tài liệu nguồn</label><div className="segmented"><button className={sourceMode === "file" ? "active" : ""} onClick={() => setSourceMode("file")}>Tải file</button><button className={sourceMode === "text" ? "active" : ""} onClick={() => setSourceMode("text")}>Nhập văn bản</button></div>{sourceMode === "file" ? (<div className="dropzone-area">{fileNames.length > 0 && <div className="file-chips">{fileNames.map((name, idx) => <span key={name} className="file-chip"><span>{name}</span><button type="button" onClick={() => removeFile(idx)} aria-label={`Xóa ${name}`}><X size={12} /></button></span>)}</div>}<label ref={dropRef} className={`dropzone ${fileNames.length ? "has-file" : ""} ${isDragging ? "dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files.length) void handleSourceFiles(e.dataTransfer.files); }}><UploadCloud size={27} /><strong>{fileNames.length ? `${fileNames.length} tệp đã chọn · kéo thêm hoặc nhấn` : "Kéo thả file vào đây"}</strong><span>{fileNames.length ? `Tổng ${fileNames.length}/${MAX_FILES} tệp · nhấn để thêm` : "hoặc nhấn để chọn từ máy"}</span><small>PDF, DOCX, TXT, JPG, PNG · tối đa 5 tệp · mỗi tệp ≤ 8 MB</small><input type="file" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png" onChange={(e) => { if (e.target.files) void handleSourceFiles(e.target.files); e.target.value = ""; }} /></label></div>) : <Textarea value={sourceText} onChange={(e) => setSourceText(e.target.value)} className="min-h-36" placeholder="Dán nội dung bài học hoặc tài liệu vào đây..." />}</div>
         <Button className="generate-button" onClick={generateQuiz} disabled={generating}><Sparkles /> {generating ? "Đang tạo câu hỏi..." : "Tạo Quiz Ngay"}</Button>
       </aside>
-      <section className="workspace-card"><div className="workspace-header"><div><h2>Khu vực hiển thị</h2><p>{questions.length ? `Kết quả: ${questions.length} câu hỏi` : "Bản nháp sẽ xuất hiện tại đây"}</p></div>{questions.length > 0 && <Button className="purple-button" onClick={publishQuiz}><Link2 /> Link làm bài cho HS</Button>}</div>
+      <section className="workspace-card"><div className="workspace-header"><div><h2>Khu vực hiển thị</h2><p>{questions.length ? `Kết quả: ${questions.length} câu hỏi` : "Bản nháp sẽ xuất hiện tại đây"}</p></div>{questions.length > 0 && <div className="workspace-actions"><Button variant="outline" onClick={() => window.print()}><Printer /> In / Lưu PDF</Button><Button className="purple-button" onClick={publishQuiz}><Link2 /> Kiểm tra & phát hành</Button></div>}</div>
         {generating ? <div className="loading-state"><span className="ai-loader"><BrainCircuit /></span><LoaderCircle className="spin" /><h3>Đang phân tích tài liệu</h3><p>Trợ lý AI đang xây dựng câu hỏi theo cấu trúc Bloom đã chọn.</p></div> : questions.length === 0 ? <div className="empty-state"><span><BrainCircuit /></span><h3>Sẵn sàng tạo câu hỏi</h3><p>Tải tài liệu hoặc nhập chủ đề ở bảng bên trái, sau đó nhấn “Tạo Quiz Ngay”.</p><div className="empty-steps"><b>1</b><span>Chọn nội dung</span><ChevronRight /><b>2</b><span>Tạo đề</span><ChevronRight /><b>3</b><span>Duyệt & giao bài</span></div></div> : <div className="questions-list">{questions.map((question, index) => <QuestionCard key={question.id} question={question} index={index} onEdit={() => setEditIndex(index)} onDelete={() => setQuestions((current) => current.filter((_, i) => i !== index))} />)}</div>}
       </section>
     </div>
@@ -218,8 +260,8 @@ function ClassManager({ classes, setClasses, quizzes, submissions, onRefresh }: 
       const clean = line.replace(/^\d+[.)]\s*/, "").trim();
       if (!clean) return null;
       const parts = clean.split(new RegExp("\\t|\\s*\\|\\s*")).map((part) => part.trim());
-      if (parts.length === 1) return { id: crypto.randomUUID(), code: `${normalizedClassCode}${String(index + 1).padStart(3, "0")}`, name: parts[0] };
-      return { id: crypto.randomUUID(), code: parts[0].toUpperCase(), name: parts[1], email: parts[2] || undefined, zaloUserId: parts[3] || undefined };
+      if (parts.length === 1) return { id: createClientId(), code: `${normalizedClassCode}${String(index + 1).padStart(3, "0")}`, name: parts[0] };
+      return { id: createClientId(), code: parts[0].toUpperCase(), name: parts[1], email: parts[2] || undefined, zaloUserId: parts[3] || undefined };
     }).filter((student): student is Student => !!student?.name);
     if (!className.trim() || !normalizedClassCode || !students.length) return toast.error("Vui lòng nhập tên lớp, mã lớp và danh sách học sinh.");
     try {
@@ -277,22 +319,20 @@ function Stat({ label, value, suffix, tone, icon, badge }: { label: string; valu
 function SubmissionTable({ rows, quizzes }: { rows: Submission[]; quizzes: Quiz[] }) { return rows.length ? <div className="data-table"><Table><TableHeader><TableRow><TableHead>Học sinh</TableHead><TableHead>Mã HS</TableHead><TableHead>Lớp</TableHead><TableHead>Bài tập</TableHead><TableHead>Điểm</TableHead><TableHead>Thời gian</TableHead><TableHead>Lượt</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell className="font-semibold">{row.studentName}</TableCell><TableCell>{row.studentCode || "—"}</TableCell><TableCell>{row.className}</TableCell><TableCell>{quizzes.find((quiz) => quiz.id === row.quizId)?.title || "Bài tập"}</TableCell><TableCell><span className="score-chip">{row.score}/10</span></TableCell><TableCell>{formatDuration(row.durationSeconds)}</TableCell><TableCell>Lần {row.attemptNumber}/3</TableCell></TableRow>)}</TableBody></Table></div> : <div className="table-empty"><span><History /></span><h3>Chưa có học sinh nào nộp bài</h3><p>Kết quả sẽ tự động xuất hiện tại đây sau khi học sinh nhấn “Nộp bài”.</p></div>; }
 function StudentStatusTable({ mode, classroom, submissions, done, pending }: { mode: string; classroom?: Classroom; submissions: Submission[]; done: Student[]; pending: Student[] }) { if (!classroom) return <div className="table-empty"><h3>Chưa có danh sách lớp</h3></div>; const students = mode === "done" ? done : mode === "pending" ? pending : classroom.students; if (!students.length) return <div className="table-empty"><span>{mode === "done" ? <CheckCircle2 /> : <Users />}</span><h3>{mode === "done" ? "Chưa có học sinh hoàn thành bài" : "Tất cả học sinh đã hoàn thành"}</h3></div>; return <div className="data-table"><Table><TableHeader><TableRow><TableHead>Mã học sinh</TableHead><TableHead>Họ và tên</TableHead><TableHead>Lớp</TableHead>{mode === "pending" ? <TableHead>Liên hệ</TableHead> : <><TableHead>Số lượt nộp</TableHead><TableHead>Điểm trung bình</TableHead></>}</TableRow></TableHeader><TableBody>{students.map((student) => { const rows = submissions.filter((item) => item.studentCode === student.code || normalize(item.studentName) === normalize(student.name)); const average = rows.length ? rows.reduce((sum, item) => sum + item.score, 0) / rows.length : 0; return <TableRow key={student.id}><TableCell><b className="student-code">{student.code}</b></TableCell><TableCell className="font-semibold">{student.name}</TableCell><TableCell>{classroom.name}</TableCell>{mode === "pending" ? <TableCell><span className="pending-chip">{student.email || student.zaloUserId ? "Sẵn sàng nhắc" : "Thiếu liên hệ"}</span></TableCell> : <><TableCell><span className="done-chip">{rows.length}/3 lượt</span></TableCell><TableCell>{rows.length ? `${average.toFixed(1)}/10` : "—"}</TableCell></>}</TableRow>; })}</TableBody></Table></div>; }
 
-function LoginPage({ onLogin }: { onLogin: (email: string) => void }) {
+function LoginPage({ onLogin }: { onLogin: (email: string, accessCode: string) => Promise<string | null> }) {
   const [email, setEmail] = useState("");
-  const [tab, setTab] = useState<"teacher" | "google">("teacher");
+  const [accessCode, setAccessCode] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = email.trim();
     if (!trimmed || !trimmed.includes("@")) return toast.error("Vui lòng nhập email hợp lệ.");
+    if (!accessCode) return toast.error("Vui lòng nhập mã truy cập giáo viên.");
     setLoading(true);
-    setTimeout(() => { setLoading(false); onLogin(trimmed); }, 800);
-  }
-
-  function handleGoogleMock() {
-    setLoading(true);
-    setTimeout(() => { setLoading(false); onLogin("giaovien@gmail.com"); }, 1000);
+    const error = await onLogin(trimmed, accessCode);
+    setLoading(false);
+    if (error) toast.error(error);
   }
 
   return (
@@ -303,38 +343,25 @@ function LoginPage({ onLogin }: { onLogin: (email: string) => void }) {
         <h1 className="login-title">Đăng nhập EduQuiz AI</h1>
         <p className="login-desc">Quản lý lớp học, tạo đề thi bằng AI và theo dõi kết quả học sinh theo thời gian thực.</p>
 
-        <div className="login-tabs">
-          <button className={tab === "teacher" ? "active" : ""} onClick={() => setTab("teacher")}><Users size={15} /> Đăng nhập Giáo viên</button>
-          <button className={tab === "google" ? "active" : ""} onClick={() => setTab("google")}><span className="g-icon">G</span> Google Account</button>
-        </div>
-
-        {tab === "google" ? (
-          <div className="login-google-section">
-            <button className="google-signin-btn" onClick={handleGoogleMock} disabled={loading}>
-              <span className="g-icon-lg">G</span>
-              <span>{loading ? "Đang đăng nhập..." : "Đăng nhập với Google"}</span>
-            </button>
-            <p className="login-google-note">Đăng nhập Google đồng bộ hóa đề thi và dữ liệu với tài khoản của bạn.</p>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="login-form">
-            <label className="login-field-label"><Mail size={14} /> Email giáo viên</label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="giaovien@truong.edu.vn" autoFocus className="login-input" />
-            <Button type="submit" className="login-submit" disabled={loading}>
-              {loading ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}
-              {loading ? "Đang xác thực..." : "Vào Dashboard"}
-            </Button>
-          </form>
-        )}
+        <form onSubmit={handleSubmit} className="login-form">
+          <label className="login-field-label" htmlFor="teacher-email"><Mail size={14} /> Email giáo viên</label>
+          <Input id="teacher-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="giaovien@truong.edu.vn" autoComplete="email" autoFocus className="login-input" />
+          <label className="login-field-label" htmlFor="teacher-code"><KeyRound size={14} /> Mã truy cập</label>
+          <Input id="teacher-code" type="password" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} placeholder="Mã do quản trị viên cấp" autoComplete="current-password" className="login-input" />
+          <Button type="submit" className="login-submit" disabled={loading}>
+            {loading ? <LoaderCircle className="spin" size={18} /> : <Shield size={18} />}
+            {loading ? "Đang xác thực..." : "Đăng nhập an toàn"}
+          </Button>
+        </form>
 
         <div className="login-features">
           <div><Cloud size={16} /><span>Đồng bộ đề thi tự động trên <strong>Database Cloud</strong></span></div>
-          <div><FileText size={16} /><span>Tạo mã làm bài &amp; Xuất đề thi PDF / QR Code</span></div>
+          <div><FileText size={16} /><span>In đề / lưu PDF, tạo link và mã QR cho học sinh</span></div>
           <div><Shield size={16} /><span>Trợ lý <strong>AI Gemini</strong> hỗ trợ tạo đề tự động</span></div>
         </div>
         <p className="login-student-note">Học sinh tham gia làm bài trực tiếp qua Link hoặc Mã QR mà không cần đăng nhập tài khoản.</p>
       </div>
+      <Toaster position="top-right" richColors />
     </div>
   );
 }
-

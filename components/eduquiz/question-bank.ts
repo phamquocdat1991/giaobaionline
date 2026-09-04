@@ -51,7 +51,7 @@ function fromSourceText(topic: string, text: string, bloom: BloomLevel[]): Item[
   const sentences = extractSentences(text);
 
   if (sentences.length >= 2) {
-    const items: Item[] = sentences.slice(0, 10).map((sentence, i) => {
+    const items: Item[] = sentences.slice(0, 20).map((sentence, i) => {
       const level = bloom[i % bloom.length];
       // Pick a different sentence as a wrong option
       const wrongSentence1 = sentences[(i + 1) % sentences.length] || "Thông tin không có trong tài liệu";
@@ -99,6 +99,22 @@ function fromSourceText(topic: string, text: string, bloom: BloomLevel[]): Item[
     [`Để hiểu tốt tài liệu "${t2}", bước nào nên làm đầu tiên?`, ["Đọc toàn bộ và xác định ý chính", "Bỏ qua phần mở đầu", "Chỉ đọc tiêu đề", "Tìm câu trả lời trước"], 0, "Thông hiểu"],
     [`Thông tin trong tài liệu "${t2}" được dùng để làm gì?`, ["Hiểu và vận dụng kiến thức đã học", "Ghi nhớ máy móc", "Đoán mò câu trả lời", "Tìm thông tin không liên quan"], 0, "Vận dụng thấp"],
     [`Sau khi đọc tài liệu "${t2}", em cần làm gì để ghi nhớ tốt?`, ["Tóm tắt ý chính và liên hệ thực tế", "Đọc lại nhiều lần không hiểu", "Bỏ qua phần khó", "Chép lại toàn bộ"], 0, "Vận dụng cao"],
+    [`Thông tin nào cần được ưu tiên khi học chủ đề "${t2}"?`, ["Các khái niệm và ý chính của bài", "Chi tiết không liên quan", "Tin đồn chưa kiểm chứng", "Ý kiến ngoài chủ đề"], 0, "Nhận biết"],
+    [`Cách nào giúp kiểm tra mức độ hiểu bài "${t2}"?`, ["Tự diễn đạt lại nội dung bằng lời của mình", "Chỉ học thuộc tiêu đề", "Bỏ qua ví dụ", "Không đặt câu hỏi"], 0, "Thông hiểu"],
+    [`Khi gặp một khái niệm khó trong "${t2}", em nên làm gì?`, ["Tra cứu nguồn tin cậy và hỏi giáo viên", "Đoán ngẫu nhiên", "Bỏ qua hoàn toàn", "Chép mà không hiểu"], 0, "Vận dụng thấp"],
+    [`Sản phẩm học tập nào phù hợp để tổng hợp chủ đề "${t2}"?`, ["Sơ đồ tư duy có dẫn chứng", "Một trang giấy trắng", "Danh sách nội dung ngoài bài", "Bản sao không chọn lọc"], 0, "Vận dụng cao"],
+    [`Mục tiêu quan trọng khi học "${t2}" là gì?`, ["Hiểu bản chất và biết cách vận dụng", "Nhớ vị trí từng dòng", "Hoàn thành thật nhanh", "Tránh thảo luận"], 0, "Thông hiểu"],
+    [`Dấu hiệu nào cho thấy em đã nắm được "${t2}"?`, ["Giải thích được ý chính và đưa ra ví dụ", "Chỉ nhớ tên bài", "Không thể trả lời câu hỏi", "Lặp lại mà không hiểu"], 0, "Thông hiểu"],
+    [`Khi thảo luận về "${t2}", ý kiến nên dựa trên điều gì?`, ["Kiến thức và dẫn chứng phù hợp", "Cảm tính hoàn toàn", "Thông tin không rõ nguồn", "Suy đoán không kiểm tra"], 0, "Vận dụng thấp"],
+    [`Cách ghi chép nào hiệu quả với bài "${t2}"?`, ["Sắp xếp ý chính theo nhóm và từ khóa", "Chép mọi câu không phân loại", "Chỉ ghi phần dễ", "Không ghi ví dụ"], 0, "Vận dụng thấp"],
+    [`Trước khi kết luận về "${t2}", em cần làm gì?`, ["Đối chiếu thông tin và dẫn chứng", "Chọn đáp án dài nhất", "Dựa vào phỏng đoán", "Bỏ qua dữ kiện"], 0, "Vận dụng cao"],
+    [`Câu hỏi nào giúp đào sâu chủ đề "${t2}"?`, ["Vì sao nội dung này quan trọng và áp dụng ra sao?", "Tên bài có bao nhiêu chữ?", "Trang sách màu gì?", "Ai đọc nhanh nhất?"], 0, "Vận dụng cao"],
+    [`Ví dụ trong bài "${t2}" có vai trò gì?`, ["Làm rõ khái niệm và cách vận dụng", "Thay thế toàn bộ kiến thức", "Làm bài dài hơn", "Không có tác dụng"], 0, "Thông hiểu"],
+    [`Khi hai nguồn nói khác nhau về "${t2}", em nên xử lý thế nào?`, ["Kiểm tra độ tin cậy và đối chiếu bằng chứng", "Tin nguồn xuất hiện đầu tiên", "Chọn ý mình thích", "Bỏ qua cả hai"], 0, "Vận dụng cao"],
+    [`Hoạt động nào phù hợp để ôn tập "${t2}" theo nhóm?`, ["Phân công tóm tắt rồi phản biện chéo", "Mỗi người làm việc không trao đổi", "Chỉ sao chép đáp án", "Bỏ qua ý kiến khác"], 0, "Vận dụng thấp"],
+    [`Sau một tuần, cách nào giúp nhớ lâu nội dung "${t2}"?`, ["Ôn cách quãng và tự kiểm tra", "Đọc dồn một lần", "Chỉ xem đáp án", "Không xem lại"], 0, "Vận dụng thấp"],
+    [`Tiêu chí nào phù hợp để đánh giá câu trả lời về "${t2}"?`, ["Đúng kiến thức, rõ lập luận và có dẫn chứng", "Càng dài càng tốt", "Dùng nhiều từ khó", "Không cần bám câu hỏi"], 0, "Vận dụng cao"],
+    [`Bước cuối cùng sau khi hoàn thành bài "${t2}" nên là gì?`, ["Rà soát câu trả lời và sửa điểm chưa rõ", "Nộp ngay không kiểm tra", "Xóa phần giải thích", "Đổi đáp án ngẫu nhiên"], 0, "Vận dụng cao"],
   ];
 }
 
@@ -112,9 +128,14 @@ export function buildQuestions(input: { topic: string; sourceText: string; count
     : normalized.includes("trái đất")
       ? earth
       : fromSourceText(input.topic, input.sourceText, bloom);
+  const existingPrompts = new Set(bank.map(([prompt]) => prompt));
+  const supplemental = bank.length < input.count
+    ? fromSourceText(input.topic, "", bloom).filter(([prompt]) => !existingPrompts.has(prompt))
+    : [];
+  const availableBank = [...bank, ...supplemental];
 
-  return Array.from({ length: input.count }, (_, index) => {
-    const [prompt, baseAnswers, correct, defaultLevel] = bank[index % bank.length];
+  return Array.from({ length: Math.min(input.count, availableBank.length) }, (_, index) => {
+    const [prompt, baseAnswers, correct, defaultLevel] = availableBank[index];
     const answers = [...baseAnswers];
     while (answers.length < input.answerCount) answers.push(`Phương án ${letters[answers.length]}`);
     const options = answers.slice(0, input.answerCount).map((text, i) => ({ id: letters[i], text }));
