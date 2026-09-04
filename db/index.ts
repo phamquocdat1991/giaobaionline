@@ -2,9 +2,21 @@ import { drizzle as drizzleD1 } from "drizzle-orm/d1";
 import * as schema from "./schema";
 
 let portableDb: unknown;
+let cloudflareDb: unknown;
 
 async function initLocalTables(client: { execute: (sql: string) => Promise<unknown> }) {
-  const statements = [
+  const statements = databaseStatements();
+  for (const sql of statements) {
+    try {
+      await client.execute(sql);
+    } catch {
+      // Ignore index already exists
+    }
+  }
+}
+
+function databaseStatements() {
+  return [
     `CREATE TABLE IF NOT EXISTS classrooms (
       id text PRIMARY KEY NOT NULL,
       code text DEFAULT '' NOT NULL,
@@ -50,25 +62,36 @@ async function initLocalTables(client: { execute: (sql: string) => Promise<unkno
     `CREATE INDEX IF NOT EXISTS idx_submissions_student_class ON submissions (student_name, class_name);`,
     `CREATE INDEX IF NOT EXISTS idx_submissions_quiz_student_code ON submissions (quiz_id, student_code, class_id);`,
   ];
-  for (const sql of statements) {
-    try {
-      await client.execute(sql);
-    } catch {
-      // Ignore index already exists
-    }
+}
+
+async function initD1Tables(database: { prepare: (sql: string) => { run: () => Promise<unknown> } }) {
+  for (const sql of databaseStatements()) {
+    await database.prepare(sql).run();
   }
+}
+
+async function getCloudflareDb() {
+  let workers: typeof import("cloudflare:workers");
+  try {
+    workers = await import("cloudflare:workers");
+  } catch {
+    return null;
+  }
+  if (!workers.env.DB) return null;
+  if (!cloudflareDb) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await initD1Tables(workers.env.DB as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cloudflareDb = drizzleD1(workers.env.DB as any, { schema });
+  }
+  return cloudflareDb;
 }
 
 // D1 and libSQL expose compatible Drizzle APIs but intentionally use different result types.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function getDb(): Promise<any> {
-  try {
-    const workers = await import("cloudflare:workers");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (workers.env.DB) return drizzleD1(workers.env.DB as any, { schema });
-  } catch {
-    // Standard Node runtimes use the portable Turso adapter below.
-  }
+  const database = await getCloudflareDb();
+  if (database) return database;
 
   if (portableDb) return portableDb;
   let url = process.env.TURSO_DATABASE_URL;

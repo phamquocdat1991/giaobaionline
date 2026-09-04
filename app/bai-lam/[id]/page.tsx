@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Toaster } from "@/components/ui/sonner";
-import type { Quiz, Submission } from "@/components/eduquiz/types";
+import type { StudentQuiz, Submission } from "@/components/eduquiz/types";
 
 type Identity = {
   studentName: string;
@@ -29,7 +29,7 @@ function formatDeadline(value?: string | null) {
 
 export default function StudentQuizPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [quiz, setQuiz] = useState<Quiz | null>(null);
+  const [quiz, setQuiz] = useState<StudentQuiz | null>(null);
   const [loading, setLoading] = useState(true);
   const [classCode, setClassCode] = useState("");
   const [studentCode, setStudentCode] = useState("");
@@ -156,14 +156,15 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
 
       {identity && <section className="student-questions">{quiz.questions.map((question, index) => {
         const selected = answers[question.id];
-        const isCorrect = result && selected === question.correctOptionId;
+        const correctOptionId = result?.answerKey?.[question.id];
+        const isCorrect = result && selected === correctOptionId;
         return <article key={question.id} className={`student-question ${result ? isCorrect ? "review-correct" : "review-wrong" : ""}`}>
           <div className="student-question-meta"><div><span>Câu {index + 1}</span><small>{question.level}</small></div>{result && (isCorrect ? <b className="correct-label"><CheckCircle2 /> Đúng</b> : <b className="wrong-label"><XCircle /> Chưa đúng</b>)}</div>
           <h2>{question.prompt}</h2>
           <div className="student-options">{question.options.map((option) => {
             const chosen = selected === option.id;
-            const correct = result && option.id === question.correctOptionId;
-            return <button key={option.id} disabled={!!result} className={`${chosen ? "chosen" : ""} ${correct ? "answer-correct" : ""} ${result && chosen && !correct ? "answer-wrong" : ""}`} onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))}><b>{option.id}</b><span>{option.text}</span>{correct && <CheckCircle2 />}</button>;
+            const correct = result && option.id === correctOptionId;
+            return <button type="button" key={option.id} disabled={!!result} aria-pressed={chosen} className={`${chosen ? "chosen" : ""} ${correct ? "answer-correct" : ""} ${result && chosen && !correct ? "answer-wrong" : ""}`} onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))}><b>{option.id}</b><span>{option.text}</span>{correct && <CheckCircle2 />}</button>;
           })}</div>
         </article>;
       })}</section>}

@@ -23,6 +23,17 @@ npm install
 npm run dev
 ```
 
+`npm run dev` chạy bản tương thích ChatGPT Sites. Dùng `npm run dev:next` khi cần kiểm tra trực tiếp bằng Next.js.
+
+Sao chép `.env.example` thành `.env.local` và đặt tối thiểu hai biến sau để đăng nhập giáo viên:
+
+```text
+TEACHER_ACCESS_CODE=mot-ma-truy-cap-dai-va-kho-doan
+SESSION_SECRET=mot-chuoi-bi-mat-doc-lap-dai-va-ngau-nhien
+```
+
+Phiên đăng nhập được ký ở máy chủ, lưu bằng cookie `HttpOnly` và hết hạn sau 8 giờ. Học sinh vẫn mở link làm bài mà không cần tài khoản.
+
 ## Deploy bằng Vercel
 
 Mã nguồn dùng Next.js và đã được kiểm tra bằng `next build`. Để dữ liệu hoạt động trên Vercel:
@@ -35,13 +46,23 @@ Mã nguồn dùng Next.js và đã được kiểm tra bằng `next build`. Đ�
 TURSO_DATABASE_URL=libsql://...
 TURSO_AUTH_TOKEN=...
 GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-3.8-flash
+GEMINI_MODEL=gemini-2.5-flash
 RESEND_API_KEY=...
 RESEND_FROM_EMAIL=EduQuiz <quiz@tenmiencuaban.vn>
 ZALO_OA_ACCESS_TOKEN=...
+TEACHER_ACCESS_CODE=...
+SESSION_SECRET=...
 ```
 
 4. Đẩy dự án lên GitHub, import repository vào Vercel và deploy bằng cấu hình Next.js mặc định.
+
+Trước khi deploy, có thể chạy toàn bộ kiểm tra bằng:
+
+```bash
+npm test
+npm run lint
+npm run build:next
+```
 
 Trên ChatGPT Sites, ứng dụng sử dụng D1 được khai báo trong `.openai/hosting.json`; không cần cấu hình Turso.
 
@@ -52,5 +73,7 @@ Trên ChatGPT Sites, ứng dụng sử dụng D1 được khai báo trong `.open
 - `submissions`: lượt nộp, định danh học sinh, đáp án, điểm và thời gian làm bài.
 
 Nếu chưa có `GEMINI_API_KEY`, ứng dụng vẫn dùng bộ sinh câu hỏi nội bộ để giáo viên tiếp tục thao tác. Email và Zalo chỉ gửi khi có khóa tương ứng; lỗi dịch vụ ngoài không làm mất bài nộp của học sinh.
+
+API quản trị lớp, đề và bài nộp yêu cầu phiên giáo viên hợp lệ. API công khai cho học sinh không trả đáp án đúng trước khi nộp; đáp án chỉ được gửi kèm kết quả đã chấm.
 
 Thông tin nhạy cảm không được ghi trực tiếp vào mã nguồn. Các token cơ sở dữ liệu phải được đặt trong biến môi trường của nền tảng triển khai.

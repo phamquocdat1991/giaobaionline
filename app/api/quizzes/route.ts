@@ -1,6 +1,8 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { quizzes } from "@/db/schema";
+import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
+import { validateQuestions } from "@/lib/quiz-validation";
 
 const mapQuiz = (row: typeof quizzes.$inferSelect) => ({
   ...row,
@@ -9,7 +11,8 @@ const mapQuiz = (row: typeof quizzes.$inferSelect) => ({
   maxAttempts: row.maxAttempts || 3,
 });
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!(await requireTeacher(request))) return unauthorizedResponse();
   try {
     const db = await getDb();
     const rows = await db.select().from(quizzes).orderBy(desc(quizzes.createdAt));
@@ -20,22 +23,31 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!(await requireTeacher(request))) return unauthorizedResponse();
   try {
     const body = await request.json() as Record<string, unknown>;
-    if (!body.title || !Array.isArray(body.questions) || !body.questions.length) return Response.json({ error: "Bài tập chưa có câu hỏi." }, { status: 400 });
+    const title = String(body.title || "").trim();
+    const validation = validateQuestions(body.questions);
+    if (!title || validation.errors.length) {
+      return Response.json({ error: !title ? "Vui lòng nhập tên bài học hoặc chủ đề." : validation.errors[0], errors: validation.errors }, { status: 400 });
+    }
+    const deadline = body.deadline ? new Date(String(body.deadline)) : null;
+    if (deadline && (!Number.isFinite(deadline.getTime()) || deadline.getTime() <= Date.now())) {
+      return Response.json({ error: "Hạn nộp phải là thời điểm hợp lệ trong tương lai." }, { status: 400 });
+    }
     const id = String(body.id || crypto.randomUUID());
     const value = {
       id,
-      title: String(body.title),
+      title,
       educationLevel: String(body.educationLevel || "THCS"),
       grade: String(body.grade || "Lớp 6"),
       subject: String(body.subject || "Ngữ văn"),
       bloomJson: JSON.stringify(body.bloom || []),
-      questionsJson: JSON.stringify(body.questions),
+      questionsJson: JSON.stringify(validation.questions),
       assignedClassId: body.assignedClassId ? String(body.assignedClassId) : null,
       teacherEmail: String(body.teacherEmail || "giaovien@example.com"),
       status: String(body.status || "draft"),
-      deadline: body.deadline ? String(body.deadline) : null,
+      deadline: deadline ? deadline.toISOString() : null,
       timeLimitMinutes: body.timeLimitMinutes ? Math.max(1, Math.min(240, Number(body.timeLimitMinutes))) : null,
       maxAttempts: 3,
       updatedAt: new Date().toISOString(),
