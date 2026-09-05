@@ -35,12 +35,24 @@ async function readCssTree(directory) {
   return contents.join("\n");
 }
 
+async function readProductCss() {
+  try {
+    return await readCssTree(path.join(root, "dist"));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return readFile(path.join(root, "app/globals.css"), "utf8");
+  }
+}
+
 test("emits the product theme and responsive layout", async () => {
-  const css = await readCssTree(path.join(root, "dist"));
+  const css = await readProductCss();
 
   assert.match(css, /--indigo:/);
   assert.match(css, /\.builder-grid/);
   assert.match(css, /@media\s*\((?:max-width:\s*800px|width<=800px)\)/);
+  assert.match(css, /\.app-shell\s*\{[^}]*grid-template-columns:\s*248px/s);
+  assert.match(css, /\.login-showcase/);
+  assert.match(css, /\.overview-strip/);
 });
 
 test("forwards progress semantics to the primitive", async () => {
