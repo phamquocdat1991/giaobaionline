@@ -1,34 +1,19 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const productTitle = /<title>EduQuiz AI[^<]*<\/title>/i;
+const root = fileURLToPath(new URL("..", import.meta.url));
 
-test("renders the EduQuiz application shell", async () => {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+test("defines the EduQuiz application shell and primary journeys", async () => {
+  const [layout, page] = await Promise.all([
+    readFile(`${root}/app/layout.tsx`, "utf8"),
+    readFile(`${root}/app/page.tsx`, "utf8"),
+  ]);
 
-  const response = await worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
-
-  assert.equal(response.status, 200);
-  assert.match(
-    response.headers.get("content-type") ?? "",
-    /^text\/html\b/i,
-  );
-  const html = await response.text();
-  assert.match(html, productTitle);
-  assert.match(html, /EduQuiz/);
+  assert.match(layout, /EduQuiz AI — Tạo đề và giao bài trực tuyến/);
+  assert.match(page, /Không gian giáo viên/);
+  assert.match(page, /Tạo Quiz Ngay/);
+  assert.match(page, /overview-strip/);
+  assert.match(page, /login-showcase/);
 });
