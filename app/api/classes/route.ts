@@ -10,9 +10,8 @@ export async function GET(request: Request) {
   if (!session) return unauthorizedResponse();
   try {
     const db = await getDb();
-    // Rows created before account isolation had no owner. The first verified
-    // teacher session after the migration keeps those existing classrooms.
-    await db.update(classrooms).set({ ownerEmail: session.email }).where(eq(classrooms.ownerEmail, ""));
+    // Legacy ownership must be assigned explicitly by the administrator.
+    // A newly signed-in Google user must never acquire another teacher's roster.
     const rows = await db.select().from(classrooms).where(eq(classrooms.ownerEmail, session.email)).orderBy(asc(classrooms.name));
     return Response.json({ classes: rows.map(mapClassroom) });
   } catch (error) {

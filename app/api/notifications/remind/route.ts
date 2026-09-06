@@ -1,9 +1,10 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classrooms, quizzes, submissions } from "@/db/schema";
 import { mapClassroom } from "@/lib/roster";
 import { notifyStudent } from "@/lib/notifications";
 import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
+import { matchesStudent } from "@/lib/client-utils";
 
 export async function POST(request: Request) {
   const session = await requireTeacher(request);
@@ -25,11 +26,9 @@ export async function POST(request: Request) {
     const classroom = mapClassroom(classRow);
     const completed = await db.select({ studentCode: submissions.studentCode, studentName: submissions.studentName }).from(submissions).where(and(
       eq(submissions.quizId, quiz.id),
-      or(eq(submissions.classId, classroom.id), eq(submissions.className, classroom.name)),
+      or(eq(submissions.classId, classroom.id), and(sql`${submissions.classId} IS NULL`, eq(submissions.className, classroom.name))),
     ));
-    const completedCodes = new Set(completed.map((row: { studentCode: string }) => row.studentCode));
-    const completedNames = new Set(completed.map((row: { studentName: string }) => row.studentName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase()));
-    const pending = classroom.students.filter((student) => !completedCodes.has(student.code) && !completedNames.has(student.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase()));
+    const pending = classroom.students.filter((student) => !completed.some((row: { studentCode: string; studentName: string }) => matchesStudent(row, student)));
     const origin = new URL(request.url).origin;
     const deadlineText = quiz.deadline
       ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date(quiz.deadline))

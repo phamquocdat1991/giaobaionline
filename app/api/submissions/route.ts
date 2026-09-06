@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classrooms, quizzes, submissions } from "@/db/schema";
 import type { Question, Student } from "@/components/eduquiz/types";
@@ -34,6 +34,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as {
       quizId?: string;
+      submissionId?: string;
       studentCode?: string;
       classCode?: string;
       durationSeconds?: number;
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
 
     const db = await getDb();
     const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, body.quizId)).limit(1);
-    if (!quiz) return Response.json({ error: "Bài tập không tồn tại." }, { status: 404 });
+    if (!quiz || quiz.status !== "published") return Response.json({ error: "Bài tập không tồn tại hoặc chưa được phát hành." }, { status: 404 });
     if (quiz.deadline && Date.now() > new Date(quiz.deadline).getTime()) {
       return Response.json({ error: "Bài tập đã quá hạn nộp." }, { status: 410 });
     }
@@ -62,30 +63,39 @@ export async function POST(request: Request) {
     const student = classroom.students.find((item: Student) => item.code === studentCode);
     if (!student) return Response.json({ error: "Mã học sinh không thuộc lớp này." }, { status: 404 });
 
-    const prior = await db.select({ id: submissions.id }).from(submissions).where(and(
-      eq(submissions.quizId, body.quizId),
-      or(
-        and(eq(submissions.classId, classroom.id), eq(submissions.studentCode, student.code)),
-        and(eq(submissions.studentName, student.name), eq(submissions.className, classroom.name)),
-      ),
-    ));
     const maxAttempts = quiz.maxAttempts || 3;
-    if (prior.length >= maxAttempts) {
-      return Response.json({ error: `Đã đủ ${maxAttempts} lượt làm. Không thể nộp thêm.` }, { status: 429 });
+    const submissionId = body.submissionId || crypto.randomUUID();
+    if (typeof submissionId !== "string" || submissionId.length > 100) {
+      return Response.json({ error: "Mã bài nộp không hợp lệ." }, { status: 400 });
     }
+    const [alreadySaved] = await db.select().from(submissions).where(eq(submissions.id, submissionId)).limit(1);
+    if (alreadySaved && (alreadySaved.quizId !== quiz.id || alreadySaved.classId !== classroom.id || alreadySaved.studentCode !== student.code)) {
+      return Response.json({ error: "Mã bài nộp đã được sử dụng." }, { status: 409 });
+    }
+    const questions = JSON.parse(quiz.questionsJson) as Question[];
+    const answerKey = Object.fromEntries(questions.map((question) => [question.id, question.correctOptionId]));
+    if (alreadySaved) return Response.json({ submission: { ...mapSubmission(alreadySaved), answerKey } });
 
-    const durationSeconds = Math.max(0, Number(body.durationSeconds) || 0);
+    const durationSeconds = Math.max(0, Math.floor(Number(body.durationSeconds) || 0));
+    if (!Number.isFinite(durationSeconds)) return Response.json({ error: "Thời gian làm bài không hợp lệ." }, { status: 400 });
     if (quiz.timeLimitMinutes && durationSeconds > quiz.timeLimitMinutes * 60 + 30) {
       return Response.json({ error: "Bài nộp vượt quá thời gian cho phép." }, { status: 408 });
     }
 
-    const questions = JSON.parse(quiz.questionsJson) as Question[];
+    if (body.answers && (typeof body.answers !== "object" || Array.isArray(body.answers))) {
+      return Response.json({ error: "Đáp án bài nộp không hợp lệ." }, { status: 400 });
+    }
     const answers = body.answers || {};
+    for (const [questionId, answer] of Object.entries(answers)) {
+      const question = questions.find((item) => item.id === questionId);
+      if (!question || !question.options.some((option) => option.id === answer)) {
+        return Response.json({ error: "Bài nộp chứa câu hỏi hoặc phương án không hợp lệ." }, { status: 400 });
+      }
+    }
     const correctCount = questions.filter((question) => answers[question.id] === question.correctOptionId).length;
     const score = Math.round((correctCount / Math.max(questions.length, 1)) * 10);
-    const attemptNumber = prior.length + 1;
     const value = {
-      id: crypto.randomUUID(),
+      id: submissionId,
       quizId: body.quizId,
       studentName: student.name,
       studentCode: student.code,
@@ -95,10 +105,28 @@ export async function POST(request: Request) {
       correctCount,
       totalQuestions: questions.length,
       durationSeconds: quiz.timeLimitMinutes ? Math.min(durationSeconds, quiz.timeLimitMinutes * 60) : durationSeconds,
-      attemptNumber,
+      attemptNumber: 0,
       answersJson: JSON.stringify(answers),
     };
-    await db.insert(submissions).values(value);
+    // The count, limit check and insert are ONE SQLite statement. Parallel
+    // requests cannot all observe the same available attempt and exceed the cap.
+    const priorCount = sql`(SELECT count(*) FROM submissions WHERE quiz_id = ${quiz.id}
+      AND ((class_id = ${classroom.id} AND student_code = ${student.code})
+        OR (student_code = '' AND student_name = ${student.name} AND class_name = ${classroom.name})))`;
+    const inserted = await db.all(sql`INSERT INTO submissions
+      (id, quiz_id, student_name, student_code, class_name, class_id, score,
+       correct_count, total_questions, duration_seconds, attempt_number, answers_json)
+      SELECT ${value.id}, ${quiz.id}, ${student.name}, ${student.code}, ${classroom.name}, ${classroom.id},
+        ${score}, ${correctCount}, ${questions.length}, ${value.durationSeconds}, ${priorCount} + 1, ${value.answersJson}
+      WHERE ${priorCount} < ${maxAttempts}
+      ON CONFLICT(id) DO NOTHING RETURNING id`);
+    const [saved] = await db.select().from(submissions).where(eq(submissions.id, submissionId)).limit(1);
+    if (!saved) return Response.json({ error: `Đã đủ ${maxAttempts} lượt làm. Không thể nộp thêm.` }, { status: 429 });
+    if (saved.quizId !== quiz.id || saved.classId !== classroom.id || saved.studentCode !== student.code) {
+      return Response.json({ error: "Mã bài nộp đã được sử dụng." }, { status: 409 });
+    }
+    if (!inserted.length) return Response.json({ submission: { ...mapSubmission(saved), answerKey } });
+    const attemptNumber = saved.attemptNumber;
 
     const message = [
       `Kết quả bài “${quiz.title}” của ${student.name}: ${score}/10 điểm.`,
@@ -106,8 +134,7 @@ export async function POST(request: Request) {
       `Lượt làm: ${attemptNumber}/${maxAttempts}.`,
     ].join("\n");
     const notifications = await notifyStudent(student, `Kết quả EduQuiz: ${quiz.title}`, message);
-    const answerKey = Object.fromEntries(questions.map((question) => [question.id, question.correctOptionId]));
-    return Response.json({ submission: { ...value, answers, answerKey, notifications } }, { status: 201 });
+    return Response.json({ submission: { ...mapSubmission(saved), answerKey, notifications } }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Không thể nộp bài." }, { status: 500 });
   }

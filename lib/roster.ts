@@ -2,7 +2,7 @@ import { classrooms } from "@/db/schema";
 import type { Student } from "@/components/eduquiz/types";
 
 export function normalizeCode(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+  return String(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "D").toUpperCase().replace(/[^A-Z0-9_-]/g, "");
 }
 
 export function fallbackClassCode(name: string) {
@@ -11,7 +11,7 @@ export function fallbackClassCode(name: string) {
 
 export function parseStudents(value: unknown): Student[] {
   if (!Array.isArray(value)) return [];
-  return value.map((item, index) => {
+  return value.filter((item) => typeof item === "string" || (item && typeof item === "object")).map((item, index) => {
     if (typeof item === "string") {
       return { id: `legacy-${index}`, code: `HS${String(index + 1).padStart(3, "0")}`, name: item.trim() };
     }

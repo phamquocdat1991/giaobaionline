@@ -42,6 +42,9 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
   const [result, setResult] = useState<Submission | null>(null);
   const [expired, setExpired] = useState(false);
   const autoSubmittedRef = useRef(false);
+  const startedAtRef = useRef(0);
+  const submissionIdRef = useRef("");
+  const submitLockRef = useRef(false);
   const submitRef = useRef<(auto?: boolean) => Promise<void>>(async () => undefined);
 
   useEffect(() => {
@@ -57,14 +60,14 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
 
   useEffect(() => {
     if (!identity || result || submitting) return;
-    const timer = window.setInterval(() => setSeconds((value) => {
-      const next = value + 1;
+    const timer = window.setInterval(() => {
+      const next = Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000));
+      setSeconds(next);
       if (timeLimitSeconds > 0 && next >= timeLimitSeconds && !autoSubmittedRef.current) {
         autoSubmittedRef.current = true;
-        queueMicrotask(() => void submitRef.current(true));
+        void submitRef.current(true);
       }
-      return next;
-    }), 1000);
+    }, 250);
     return () => window.clearInterval(timer);
   }, [identity, result, submitting, timeLimitSeconds]);
 
@@ -94,6 +97,8 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
       setClassCode(data.identity.classCode);
       setStudentCode(data.identity.studentCode);
       setAttemptsRemaining(data.attemptsRemaining);
+      startedAtRef.current = Date.now();
+      submissionIdRef.current = crypto.randomUUID();
       setSeconds(0);
       autoSubmittedRef.current = false;
       toast.success(`Đã xác minh: ${data.identity.studentName}.`);
@@ -105,17 +110,19 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
   }
 
   async function submit(auto = false) {
-    if (!quiz || !identity || submitting) return;
+    if (!quiz || !identity || submitLockRef.current || result) return;
     if (!auto && answeredCount < quiz.questions.length && !window.confirm(`Bạn còn ${quiz.questions.length - answeredCount} câu chưa trả lời. Vẫn nộp bài?`)) return;
+    submitLockRef.current = true;
     setSubmitting(true);
     try {
       const response = await fetch("/api/submissions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quizId: quiz.id, studentCode: identity.studentCode, classCode: identity.classCode, durationSeconds: seconds, answers }),
+        body: JSON.stringify({ quizId: quiz.id, submissionId: submissionIdRef.current, studentCode: identity.studentCode, classCode: identity.classCode, durationSeconds: Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000)), answers }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
+      setAnswers(data.submission.answers);
       setResult(data.submission);
       setAttemptsRemaining(Math.max(0, quiz.maxAttempts - data.submission.attemptNumber));
       if (auto) toast.info("Đã hết thời gian. Hệ thống tự động nộp bài.");
@@ -123,6 +130,7 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Không thể nộp bài.");
     } finally {
+      submitLockRef.current = false;
       setSubmitting(false);
     }
   }
@@ -131,6 +139,8 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
 
   function retry() {
     if (attemptsRemaining <= 0) return toast.error("Bạn đã sử dụng đủ 3 lượt làm bài.");
+    startedAtRef.current = Date.now();
+    submissionIdRef.current = crypto.randomUUID();
     setAnswers({});
     setSeconds(0);
     setResult(null);
@@ -164,7 +174,7 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
           <div className="student-options">{question.options.map((option) => {
             const chosen = selected === option.id;
             const correct = result && option.id === correctOptionId;
-            return <button type="button" key={option.id} disabled={!!result} aria-pressed={chosen} className={`${chosen ? "chosen" : ""} ${correct ? "answer-correct" : ""} ${result && chosen && !correct ? "answer-wrong" : ""}`} onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))}><b>{option.id}</b><span>{option.text}</span>{correct && <CheckCircle2 />}</button>;
+            return <button type="button" key={option.id} disabled={!!result || submitting || (timeLimitSeconds > 0 && seconds >= timeLimitSeconds)} aria-pressed={chosen} className={`${chosen ? "chosen" : ""} ${correct ? "answer-correct" : ""} ${result && chosen && !correct ? "answer-wrong" : ""}`} onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))}><b>{option.id}</b><span>{option.text}</span>{correct && <CheckCircle2 />}</button>;
           })}</div>
         </article>;
       })}</section>}

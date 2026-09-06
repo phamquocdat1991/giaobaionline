@@ -89,3 +89,15 @@ Nếu chưa có `GEMINI_API_KEY`, ứng dụng vẫn dùng bộ sinh câu hỏi 
 API quản trị lớp, đề và bài nộp yêu cầu phiên giáo viên hợp lệ. API công khai cho học sinh không trả đáp án đúng trước khi nộp; đáp án chỉ được gửi kèm kết quả đã chấm.
 
 Thông tin nhạy cảm không được ghi trực tiếp vào mã nguồn. Các token cơ sở dữ liệu phải được đặt trong biến môi trường của nền tảng triển khai.
+
+## Bản sửa QA tháng 09/2026
+
+- API học sinh chỉ trả trường công khai; không trả JSON chứa đáp án hoặc email giáo viên.
+- Chặn xác minh/nộp đề nháp. Ghi lượt nộp bằng một câu lệnh SQL nguyên tử; hỗ trợ `submissionId` để gửi lại khi mất mạng mà không tính thêm lượt.
+- Đối chiếu học sinh theo mã, chỉ dùng tên cho dữ liệu cũ chưa có mã.
+- Giữ bộ câu hỏi khi đổi tab hoặc tạo lại gặp lỗi; sửa hạn nộp theo múi giờ máy người dùng và xử lý lỗi sao chép.
+- Tạo đề dùng Gemini `generateContent`, đối chiếu danh sách model khả dụng bằng API key hiện có; không tự bịa phương án/đáp án khi AI trả thiếu.
+- Tổng tệp tải trực tiếp tối đa 3 MB, văn bản tối đa 100.000 ký tự; kiểm tra kích thước JSON trước khi gửi để tránh giới hạn body của Vercel.
+- Lớp cũ chưa có `owner_email` phải được quản trị viên gán chủ sở hữu rõ ràng, không tự chuyển cho người đăng nhập tiếp theo.
+
+Chạy `npm test`, `npm run lint`, `npm run build:next` để kiểm tra. Bộ kiểm thử hồi quy sử dụng SQLite riêng và không gửi email/Zalo thật.

@@ -28,6 +28,11 @@ export async function POST(request: Request) {
   if (!session) return unauthorizedResponse();
   try {
     const body = await request.json() as Record<string, unknown>;
+    if (!body || Array.isArray(body) || typeof body !== "object") return Response.json({ error: "Thông tin bài tập không hợp lệ." }, { status: 400 });
+    if (body.status && !["draft", "published"].includes(String(body.status))) return Response.json({ error: "Trạng thái bài tập không hợp lệ." }, { status: 400 });
+    if (body.timeLimitMinutes != null && (!Number.isInteger(body.timeLimitMinutes) || Number(body.timeLimitMinutes) < 1 || Number(body.timeLimitMinutes) > 240)) {
+      return Response.json({ error: "Thời gian làm bài phải là số nguyên từ 1 đến 240 phút." }, { status: 400 });
+    }
     const title = String(body.title || "").trim();
     const validation = validateQuestions(body.questions);
     if (!title || validation.errors.length) {

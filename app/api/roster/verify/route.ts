@@ -15,7 +15,7 @@ export async function POST(request: Request) {
 
     const db = await getDb();
     const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, body.quizId)).limit(1);
-    if (!quiz) return Response.json({ error: "Bài tập không tồn tại." }, { status: 404 });
+    if (!quiz || quiz.status !== "published") return Response.json({ error: "Bài tập không tồn tại hoặc chưa được phát hành." }, { status: 404 });
     if (quiz.deadline && Date.now() > new Date(quiz.deadline).getTime()) {
       return Response.json({ error: "Bài tập đã quá hạn nộp." }, { status: 410 });
     }
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       eq(submissions.quizId, body.quizId),
       or(
         and(eq(submissions.classId, classroom.id), eq(submissions.studentCode, student.code)),
-        and(eq(submissions.studentName, student.name), eq(submissions.className, classroom.name)),
+        and(eq(submissions.studentCode, ""), eq(submissions.studentName, student.name), eq(submissions.className, classroom.name)),
       ),
     ));
     const maxAttempts = quiz.maxAttempts || 3;

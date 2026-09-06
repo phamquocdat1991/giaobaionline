@@ -1,7 +1,10 @@
+import { z } from "zod";
 import { buildQuestions } from "@/components/eduquiz/question-bank";
 import type { BloomLevel, Question } from "@/components/eduquiz/types";
 import { requireTeacher, unauthorizedResponse } from "@/lib/auth";
 import { VALID_BLOOM_LEVELS, validateQuestions } from "@/lib/quiz-validation";
+
+export const maxDuration = 240;
 
 type SourceFile = { name: string; mimeType: string; data: string };
 type GenerateBody = {
@@ -22,17 +25,18 @@ const letters = ["A", "B", "C", "D", "E", "F"];
 function normalizeQuestions(value: unknown, count: number, answerCount: number, bloom: BloomLevel[]): Question[] {
   const rows = Array.isArray(value) ? value : [];
   return rows.slice(0, count).map((raw, index) => {
+    if (!raw || typeof raw !== "object") throw new Error("AI trả về câu hỏi không hợp lệ.");
     const row = raw as { prompt?: unknown; level?: unknown; options?: unknown; correctOptionId?: unknown };
     const optionTexts = (Array.isArray(row.options) ? row.options : []).map((option) => {
       if (typeof option === "string") return option.trim();
       return String((option as { text?: unknown })?.text || "").trim();
     }).filter(Boolean).slice(0, answerCount);
-    while (optionTexts.length < answerCount) optionTexts.push(`Phương án ${letters[optionTexts.length]}`);
+    if (optionTexts.length !== answerCount) throw new Error("AI trả về câu hỏi thiếu phương án. Vui lòng tạo lại.");
     const level = validBloom.includes(row.level as BloomLevel) && bloom.includes(row.level as BloomLevel)
       ? row.level as BloomLevel
       : bloom[index % bloom.length];
-    let correctOptionId = String(row.correctOptionId || "A").toUpperCase();
-    if (!letters.slice(0, answerCount).includes(correctOptionId)) correctOptionId = "A";
+    const correctOptionId = String(row.correctOptionId || "").trim().toUpperCase();
+    if (!letters.slice(0, answerCount).includes(correctOptionId)) throw new Error("AI không cung cấp đáp án đúng hợp lệ. Vui lòng tạo lại.");
     return {
       id: `q-${crypto.randomUUID()}`,
       prompt: String(row.prompt || `Câu hỏi ${index + 1}`).trim(),
@@ -103,19 +107,31 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
     allSourceFiles.length ? `Tệp đính kèm: ${allSourceFiles.map((file) => file.name).join(", ")}.` : "",
     'Chỉ trả về JSON: {"questions":[{"prompt":"...","level":"Nhận biết","options":["...","..."],"correctOptionId":"A"}]}',
   ].filter(Boolean).join("\n\n");
-  const input: Array<Record<string, unknown>> = [{ type: "text", text: userPrompt }];
+  const parts: Array<Record<string, unknown>> = [{ text: userPrompt }];
 
   for (const sf of allSourceFiles) {
     if (sf.data && sf.mimeType) {
-      input.push({
-        type: sf.mimeType === "application/pdf" ? "document" : "image",
-        data: sf.data,
-        mime_type: sf.mimeType,
-      });
+      parts.push({ inlineData: { data: sf.data, mimeType: sf.mimeType } });
     }
   }
 
-  const candidateModels = getGeminiModelCandidates();
+  let candidateModels = getGeminiModelCandidates();
+  // Model availability is key-specific. Discover supported models instead of
+  // repeatedly sending requests to model names unavailable to this project.
+  try {
+    const listing = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
+      headers: { "x-goog-api-key": apiKey }, signal: AbortSignal.timeout(10_000),
+    });
+    if (listing.ok) {
+      const catalog = await listing.json() as { models?: Array<{ name: string; supportedGenerationMethods?: string[] }> };
+      const available = (catalog.models || []).filter((model) => model.supportedGenerationMethods?.includes("generateContent"))
+        .map((model) => model.name.replace(/^models\//, ""));
+      const configured = process.env.GEMINI_MODEL?.trim();
+      const preferred = [configured, ...candidateModels, "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+        .filter((model): model is string => !!model && available.includes(model));
+      if (preferred.length) candidateModels = [...new Set(preferred)].slice(0, 3);
+    }
+  } catch { /* Transient discovery failure: use the configured candidates. */ }
   const responseSchema = {
     type: "object",
     additionalProperties: false,
@@ -144,33 +160,31 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
 
   for (const model of candidateModels) {
     try {
-      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
-          model,
-          input,
-          system_instruction: systemInstruction,
-          response_format: { type: "text", mime_type: "application/json", schema: responseSchema },
-          generation_config: { temperature: 0.15, thinking_level: "low", max_output_tokens: 8192 },
-          store: false,
+          contents: [{ role: "user", parts }],
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: { temperature: 0.15, maxOutputTokens: 8192, responseMimeType: "application/json", responseJsonSchema: responseSchema },
         }),
         signal: AbortSignal.timeout(60_000),
       });
       const data = await response.json() as {
         error?: { message?: string; code?: number };
-        status?: string;
-        steps?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }>;
+        promptFeedback?: { blockReason?: string };
       };
 
       if (!response.ok) {
-        lastErrorMessage = data.error?.message || `Lỗi từ model ${model}`;
-        console.warn(`Model ${model} chưa sẵn sàng, đang chuyển sang model Gemini 3 dự phòng...`);
+        lastErrorMessage = data.error?.message || `Gemini trả HTTP ${response.status} với model ${model}.`;
+        console.warn(`Gemini model=${model} status=${response.status}`);
+        if ([401, 403].includes(response.status)) throw new Error("API key Gemini không hợp lệ hoặc không có quyền truy cập. Vui lòng kiểm tra cấu hình key.");
         continue;
       }
 
-      if (data.status && data.status !== "completed") throw new Error(`Gemini kết thúc với trạng thái ${data.status}.`);
-      const text = extractInteractionText(data);
+      if (data.promptFeedback?.blockReason) throw new Error("Gemini từ chối xử lý tài liệu này. Vui lòng kiểm tra nội dung nguồn.");
+      const text = (data.candidates?.[0]?.content?.parts || []).filter((part) => !part.thought).map((part) => part.text || "").join("");
       if (!text) throw new Error("Gemini không trả về nội dung câu hỏi.");
       const cleaned = extractJson(text);
       const parsed = JSON.parse(cleaned) as { questions?: unknown };
@@ -182,7 +196,7 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
       }
       return questions;
     } catch (err) {
-      if (err instanceof Error && /chỉ tạo được/.test(err.message)) throw err;
+      if (err instanceof Error && /chỉ tạo được|API key Gemini/.test(err.message)) throw err;
       lastErrorMessage = err instanceof Error ? err.message : String(err);
       continue;
     }
@@ -197,7 +211,25 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
 export async function POST(request: Request) {
   if (!(await requireTeacher(request))) return unauthorizedResponse();
   try {
-    const body = await request.json() as GenerateBody;
+    const rawBody = await request.text();
+    if (new TextEncoder().encode(rawBody).length > 4_000_000) {
+      return Response.json({ error: "Tài liệu quá lớn. Hãy giảm PDF/ảnh xuống tổng 3 MB hoặc dán văn bản." }, { status: 413 });
+    }
+    let raw: unknown;
+    try { raw = JSON.parse(rawBody); }
+    catch { return Response.json({ error: "Dữ liệu JSON không hợp lệ." }, { status: 400 }); }
+    const fileSchema = z.object({ name: z.string().max(255), mimeType: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp"]), data: z.string().min(1).regex(/^[A-Za-z0-9+/]*={0,2}$/) });
+    const parsed = z.object({
+      topic: z.string().max(1000).optional(), subject: z.string().max(100).optional(), grade: z.string().max(100).optional(),
+      sourceText: z.string().max(100000).optional(), sourceFile: fileSchema.nullable().optional(), sourceFiles: z.array(fileSchema).max(5).optional(),
+      count: z.number().int().min(3).max(20).optional(), answerCount: z.number().int().min(2).max(6).optional(),
+      selectedBloom: z.array(z.enum(["Nhận biết", "Thông hiểu", "Vận dụng thấp", "Vận dụng cao"])).max(4).optional(),
+    }).safeParse(raw);
+    if (!parsed.success) return Response.json({ error: "Thông tin tạo đề hoặc tài liệu không hợp lệ. Văn bản tối đa 100.000 ký tự; hỗ trợ PDF, JPG, PNG, WEBP." }, { status: 400 });
+    const body = parsed.data;
+    if (!body.topic?.trim() && !body.sourceText?.trim() && !body.sourceFiles?.length && !body.sourceFile) {
+      return Response.json({ error: "Vui lòng nhập chủ đề hoặc tài liệu nguồn." }, { status: 400 });
+    }
     const count = Math.max(3, Math.min(20, Number(body.count) || 10));
     const answerCount = Math.max(2, Math.min(6, Number(body.answerCount) || 4));
     const selectedBloom = (body.selectedBloom || []).filter((level): level is BloomLevel => validBloom.includes(level));

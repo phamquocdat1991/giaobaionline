@@ -11,7 +11,19 @@ export function validateQuestions(value: unknown): { questions: Question[]; erro
   if (value.length > 50) return { questions: [], errors: ["Mỗi bài tập tối đa 50 câu hỏi."] };
 
   const errors: string[] = [];
-  const questions = value as Question[];
+  const questions = value.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    return {
+      id: typeof item.id === "string" ? item.id.trim() : "",
+      prompt: typeof item.prompt === "string" ? item.prompt.trim() : "",
+      level: item.level,
+      options: Array.isArray(item.options) ? item.options.map((option: { id?: unknown; text?: unknown } | null) => ({
+        id: typeof option?.id === "string" ? option.id.trim().toUpperCase() : "",
+        text: typeof option?.text === "string" ? option.text.trim() : "",
+      })) : [],
+      correctOptionId: typeof item.correctOptionId === "string" ? item.correctOptionId.trim().toUpperCase() : "",
+    };
+  }) as Question[];
   const questionIds = new Set<string>();
   const prompts = new Set<string>();
 
