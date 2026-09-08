@@ -1,4 +1,5 @@
 import { and, eq, or } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { classrooms, quizzes, submissions } from "@/db/schema";
 import { mapClassroom, normalizeCode } from "@/lib/roster";
@@ -6,7 +7,13 @@ import type { Student } from "@/components/eduquiz/types";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { quizId?: string; classCode?: string; studentCode?: string };
+    const parsed = z.object({
+      quizId: z.string().trim().min(1).max(100),
+      classCode: z.string().min(1).max(200),
+      studentCode: z.string().min(1).max(200),
+    }).safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return Response.json({ error: "Vui lòng nhập mã bài tập, mã lớp và mã học sinh hợp lệ." }, { status: 400 });
+    const body = parsed.data;
     const classCode = normalizeCode(body.classCode || "");
     const studentCode = normalizeCode(body.studentCode || "");
     if (!body.quizId || !classCode || !studentCode) {

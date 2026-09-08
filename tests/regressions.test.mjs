@@ -169,3 +169,43 @@ test('saved submissions can be recovered after deadline without accepting a new 
   assert.equal((await replay.json()).submission.score, 10);
   assert.equal((await submit(request({ ...body, submissionId: crypto.randomUUID() }))).status, 410);
 });
+
+test('student endpoints reject malformed JSON and invalid payload types with 400', async () => {
+  for (const handler of [submit, verify]) {
+    for (const value of [null, [], 'invalid', { quizId: {} }, { quizId: 'q', classCode: {}, studentCode: 'HS01' }]) {
+      assert.equal((await handler(request(value))).status, 400);
+    }
+    assert.equal((await handler(new Request('http://localhost/api/test', { method: 'POST', body: '{' }))).status, 400);
+  }
+});
+
+test('submission duration must be a nonnegative integer rather than silently coerced', async () => {
+  const { body } = await fixture();
+  for (const durationSeconds of [-1, 1.5, 'abc', '60', null]) {
+    assert.equal((await submit(request({ ...body, durationSeconds }))).status, 400);
+  }
+});
+
+test('teacher creates class and publishes quiz, student verifies and submits, teacher reads score', async () => {
+  const classApi = await vite.ssrLoadModule('/app/api/classes/route.ts');
+  const quizApi = await vite.ssrLoadModule('/app/api/quizzes/route.ts');
+  const submissionApi = await vite.ssrLoadModule('/app/api/submissions/route.ts');
+  const code = `QA${Date.now()}`;
+  const classResponse = await classApi.POST(request({ name: 'Lớp QA tự động', code, students: [{ id: 's', code: 'HS001', name: 'Học sinh kiểm thử' }] }, true));
+  assert.equal(classResponse.status, 201);
+  const classroom = (await classResponse.json()).classroom;
+  const quizResponse = await quizApi.POST(request({ title: 'Bài kiểm thử toàn luồng', questions, assignedClassId: classroom.id, status: 'published', timeLimitMinutes: 10 }, true));
+  assert.equal(quizResponse.status, 201);
+  const quiz = (await quizResponse.json()).quiz;
+  const studentBody = { quizId: quiz.id, classCode: code, studentCode: 'HS001' };
+  assert.equal((await verify(request(studentBody))).status, 200);
+  const submitted = await submit(request({ ...studentBody, answers: { q1: 'A' }, durationSeconds: 5 }));
+  assert.equal(submitted.status, 201);
+  assert.equal((await submitted.json()).submission.score, 10);
+  const results = await submissionApi.GET(new Request(`http://localhost/api/submissions?quizId=${quiz.id}`, { headers: { 'oai-authenticated-user-email': 'qa@example.test' } }));
+  assert.equal(results.status, 200);
+  const rows = (await results.json()).submissions;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].studentCode, 'HS001');
+  assert.equal(rows[0].score, 10);
+});

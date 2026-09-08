@@ -1,4 +1,5 @@
 import { desc, eq, inArray, sql } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { classrooms, quizzes, submissions } from "@/db/schema";
 import type { Question, Student } from "@/components/eduquiz/types";
@@ -32,14 +33,16 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as {
-      quizId?: string;
-      submissionId?: string;
-      studentCode?: string;
-      classCode?: string;
-      durationSeconds?: number;
-      answers?: Record<string, string>;
-    };
+    const parsed = z.object({
+      quizId: z.string().trim().min(1).max(100),
+      submissionId: z.string().trim().min(1).max(100).optional(),
+      studentCode: z.string().min(1).max(200),
+      classCode: z.string().min(1).max(200),
+      durationSeconds: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      answers: z.record(z.string()).optional(),
+    }).safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return Response.json({ error: "Thông tin bài nộp không hợp lệ. Kiểm tra mã lớp, mã học sinh, đáp án và thời gian làm bài." }, { status: 400 });
+    const body = parsed.data;
     const studentCode = normalizeCode(body.studentCode || "");
     const classCode = normalizeCode(body.classCode || "");
     if (!body.quizId || !studentCode || !classCode) {
@@ -79,8 +82,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Bài tập đã quá hạn nộp." }, { status: 410 });
     }
 
-    const durationSeconds = Math.max(0, Math.floor(Number(body.durationSeconds) || 0));
-    if (!Number.isFinite(durationSeconds)) return Response.json({ error: "Thời gian làm bài không hợp lệ." }, { status: 400 });
+    const durationSeconds = body.durationSeconds ?? 0;
     if (quiz.timeLimitMinutes && durationSeconds > quiz.timeLimitMinutes * 60 + 30) {
       return Response.json({ error: "Bài nộp vượt quá thời gian cho phép." }, { status: 408 });
     }
