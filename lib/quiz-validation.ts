@@ -3,7 +3,7 @@ import type { BloomLevel, Question } from "@/components/eduquiz/types";
 export const VALID_BLOOM_LEVELS: BloomLevel[] = ["Nhận biết", "Thông hiểu", "Vận dụng thấp", "Vận dụng cao"];
 
 function comparable(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
+  return value.normalize("NFC").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 export function validateQuestions(value: unknown): { questions: Question[]; errors: string[] } {

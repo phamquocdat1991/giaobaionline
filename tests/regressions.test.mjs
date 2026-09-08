@@ -152,3 +152,20 @@ test('question IDs and answer IDs are canonicalized before storage and grading',
   assert.equal(result.questions[0].options[0].id, 'A');
   assert.equal(result.questions[0].id, 'q1');
 });
+
+test('Vietnamese tones distinguish valid answer options', async () => {
+  const { validateQuestions } = await vite.ssrLoadModule('/lib/quiz-validation.ts');
+  const result = validateQuestions([{ ...questions[0], options: [{ id: 'A', text: 'ma' }, { id: 'B', text: 'má' }] }]);
+  assert.deepEqual(result.errors, []);
+});
+
+test('saved submissions can be recovered after deadline without accepting a new attempt', async () => {
+  const { id, body } = await fixture();
+  const submissionId = crypto.randomUUID();
+  assert.equal((await submit(request({ ...body, submissionId }))).status, 201);
+  await db.update(schema.quizzes).set({ deadline: '2020-01-01T00:00:00Z' }).where(eq(schema.quizzes.id, id));
+  const replay = await submit(request({ ...body, submissionId }));
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).submission.score, 10);
+  assert.equal((await submit(request({ ...body, submissionId: crypto.randomUUID() }))).status, 410);
+});

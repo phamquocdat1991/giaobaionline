@@ -49,9 +49,6 @@ export async function POST(request: Request) {
     const db = await getDb();
     const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, body.quizId)).limit(1);
     if (!quiz || quiz.status !== "published") return Response.json({ error: "Bài tập không tồn tại hoặc chưa được phát hành." }, { status: 404 });
-    if (quiz.deadline && Date.now() > new Date(quiz.deadline).getTime()) {
-      return Response.json({ error: "Bài tập đã quá hạn nộp." }, { status: 410 });
-    }
 
     const classRows = quiz.assignedClassId
       ? await db.select().from(classrooms).where(eq(classrooms.id, quiz.assignedClassId))
@@ -75,6 +72,12 @@ export async function POST(request: Request) {
     const questions = JSON.parse(quiz.questionsJson) as Question[];
     const answerKey = Object.fromEntries(questions.map((question) => [question.id, question.correctOptionId]));
     if (alreadySaved) return Response.json({ submission: { ...mapSubmission(alreadySaved), answerKey } });
+
+    // A retry may recover a previously saved result after the deadline, but
+    // new submissions still must arrive before it.
+    if (quiz.deadline && Date.now() > new Date(quiz.deadline).getTime()) {
+      return Response.json({ error: "Bài tập đã quá hạn nộp." }, { status: 410 });
+    }
 
     const durationSeconds = Math.max(0, Math.floor(Number(body.durationSeconds) || 0));
     if (!Number.isFinite(durationSeconds)) return Response.json({ error: "Thời gian làm bài không hợp lệ." }, { status: 400 });
