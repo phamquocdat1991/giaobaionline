@@ -58,7 +58,7 @@ export function extractJson(text: string): string {
 export function getGeminiModelCandidates(configuredModel = process.env.GEMINI_MODEL) {
   const configured = configuredModel?.trim();
   const supportedConfiguredModel = configured && /^gemini-3(?:\.|-)/.test(configured) ? configured : null;
-  return [supportedConfiguredModel, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+  return [supportedConfiguredModel, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
     .filter((model): model is string => Boolean(model))
     .filter((model, index, models) => models.indexOf(model) === index);
 }
@@ -160,6 +160,7 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
 
   for (const model of candidateModels) {
     try {
+      const modelTimeoutMs = model.includes("lite") ? 6_000 : model.includes("3.8") ? 12_000 : 9_000;
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -168,7 +169,7 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
           systemInstruction: { parts: [{ text: systemInstruction }] },
           generationConfig: { temperature: 0.15, maxOutputTokens: 8192, responseMimeType: "application/json", responseJsonSchema: responseSchema },
         }),
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(modelTimeoutMs),
       });
       const data = await response.json() as {
         error?: { message?: string; code?: number };
