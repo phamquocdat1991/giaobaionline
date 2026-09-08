@@ -8,6 +8,7 @@ export const maxDuration = 240;
 
 type SourceFile = { name: string; mimeType: string; data: string };
 type GenerateBody = {
+  apiKey?: string;
   topic?: string;
   subject?: string;
   grade?: string;
@@ -74,7 +75,7 @@ export function extractInteractionText(value: unknown) {
 }
 
 async function generateWithGemini(body: GenerateBody, count: number, answerCount: number, bloom: BloomLevel[]) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = body.apiKey?.trim() || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
   const allSourceFiles: SourceFile[] = [];
@@ -221,6 +222,7 @@ export async function POST(request: Request) {
     catch { return Response.json({ error: "Dữ liệu JSON không hợp lệ." }, { status: 400 }); }
     const fileSchema = z.object({ name: z.string().max(255), mimeType: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp"]), data: z.string().min(1).regex(/^[A-Za-z0-9+/]*={0,2}$/) });
     const parsed = z.object({
+      apiKey: z.string().trim().max(512).regex(/^[\x21-\x7E]*$/).optional(),
       topic: z.string().max(1000).optional(), subject: z.string().max(100).optional(), grade: z.string().max(100).optional(),
       sourceText: z.string().max(100000).optional(), sourceFile: fileSchema.nullable().optional(), sourceFiles: z.array(fileSchema).max(5).optional(),
       count: z.number().int().min(3).max(20).optional(), answerCount: z.number().int().min(2).max(6).optional(),
@@ -247,7 +249,7 @@ export async function POST(request: Request) {
     }
 
     if (allFiles.some(f => f.mimeType?.startsWith("image/") || f.mimeType === "application/pdf")) {
-      return Response.json({ error: "Không thể trích xuất nội dung từ Ảnh/PDF khi chưa cấu hình GEMINI_API_KEY. Vui lòng thêm API Key vào biến môi trường hoặc nhập văn bản thuần để dùng tạm." }, { status: 400 });
+      return Response.json({ error: "Không thể trích xuất nội dung từ Ảnh/PDF khi chưa cấu hình GEMINI_API_KEY. Vui lòng nhập Gemini API Key trong Cấu hình Quiz hoặc nhập văn bản thuần để dùng tạm." }, { status: 400 });
     }
 
     const questions = buildQuestions({

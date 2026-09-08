@@ -139,6 +139,8 @@ export default function Home() {
 }
 
 function QuizBuilder({ classes, quizzesCount, submissionsCount, teacherEmail, aiConfigured, onSaved }: { classes: Classroom[]; quizzesCount: number; submissionsCount: number; teacherEmail: string; aiConfigured: boolean; onSaved: (quiz: Quiz) => void }) {
+  const [apiKey, setApiKey] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
   const [educationLevel, setEducationLevel] = useState("THCS"); const [grade, setGrade] = useState("Lớp 7"); const [subject, setSubject] = useState("Ngữ văn");
   const [questionCount, setQuestionCount] = useState(10); const [answerCount, setAnswerCount] = useState(4);
   const [selectedBloom, setSelectedBloom] = useState<BloomLevel[]>(["Nhận biết", "Thông hiểu", "Vận dụng thấp"]);
@@ -199,7 +201,7 @@ function QuizBuilder({ classes, quizzesCount, submissionsCount, teacherEmail, ai
     if (!selectedBloom.length) return toast.error("Vui lòng chọn ít nhất một mức độ Bloom.");
     setGenerating(true); setEditIndex(null);
     try {
-      const payload = JSON.stringify({ topic, subject, grade, sourceText: effectiveSourceText, sourceFiles: sourceMode === "file" ? sourceFiles : [], count: questionCount, answerCount, selectedBloom });
+      const payload = JSON.stringify({ apiKey: apiKey.trim() || undefined, topic, subject, grade, sourceText: effectiveSourceText, sourceFiles: sourceMode === "file" ? sourceFiles : [], count: questionCount, answerCount, selectedBloom });
       if (new Blob([payload]).size > 4_000_000) throw new Error("Tài liệu quá lớn. Hãy giảm PDF/ảnh hoặc dán văn bản tối đa 100.000 ký tự.");
       const response = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
       const data = await response.json().catch(() => ({ error: response.status === 413 ? "Tài liệu quá lớn. Hãy giảm dung lượng tệp." : "Dịch vụ tạo đề chưa phản hồi. Vui lòng thử lại." })); if (!response.ok) throw new Error(data.error); await new Promise((r) => setTimeout(r, 350)); setQuestions(data.questions); setQuizId(createClientId()); toast.success(data.engine === "gemini" ? `AI đã tạo ${data.questions.length} câu hỏi.` : `Đã tạo ${data.questions.length} câu hỏi bằng bộ sinh dự phòng.`); }
@@ -230,10 +232,18 @@ function QuizBuilder({ classes, quizzesCount, submissionsCount, teacherEmail, ai
     }
   }
   return <main className="builder-page">
-    <section className="page-heading compact-heading"><div><span className="eyebrow"><Sparkles size={14} /> TẠO BÀI TẬP THÔNG MINH</span><h1>Tạo câu hỏi và giao bài trực tuyến</h1><p>Thiết lập cấu trúc đề, tải tài liệu và duyệt đáp án trước khi gửi cho học sinh.</p></div><span className={`api-status ${aiConfigured ? "" : "fallback"}`}>{aiConfigured ? <CheckCircle2 size={15} /> : <Cloud size={15} />} {aiConfigured ? "Đã cấu hình Gemini AI" : "Đang dùng bộ sinh dự phòng"}</span></section>
+    <section className="page-heading compact-heading"><div><span className="eyebrow"><Sparkles size={14} /> TẠO BÀI TẬP THÔNG MINH</span><h1>Tạo câu hỏi và giao bài trực tuyến</h1><p>Thiết lập cấu trúc đề, tải tài liệu và duyệt đáp án trước khi gửi cho học sinh.</p></div><span className={`api-status ${aiConfigured ? "" : "fallback"}`}>{aiConfigured ? <CheckCircle2 size={15} /> : <Cloud size={15} />} {apiKey.trim() ? "Sẽ dùng API Key đã nhập" : aiConfigured ? "Đã cấu hình Gemini AI" : "Đang dùng bộ sinh dự phòng"}</span></section>
     <section className="overview-strip" aria-label="Tổng quan nhanh"><article><span className="overview-icon blue"><GraduationCap /></span><div><small>Lớp học</small><strong>{classes.length} <em>lớp</em></strong></div></article><article><span className="overview-icon violet"><FileText /></span><div><small>Đề đã lưu</small><strong>{quizzesCount} <em>đề</em></strong></div></article><article><span className="overview-icon mint"><Send /></span><div><small>Lượt nộp bài</small><strong>{submissionsCount} <em>lượt</em></strong></div></article></section>
     <div className="builder-grid">
       <aside className="config-card"><div className="section-title"><span><BookOpen size={18} /></span><div><h2>Cấu hình Quiz</h2><p>Thông tin bài học và cấu trúc đề</p></div></div>
+        <div className="field-block">
+          <label className="field-label" htmlFor="gemini-api-key">Gemini API Key</label>
+          <div className="flex items-center gap-2">
+            <Input id="gemini-api-key" className="min-w-0 flex-1" type={showApiKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Nhập API Key Gemini của bạn" autoComplete="off" spellCheck={false} maxLength={512} disabled={generating} aria-describedby="gemini-key-help" />
+            <Button type="button" variant="outline" onClick={() => setShowApiKey(!showApiKey)} aria-label={showApiKey ? "Ẩn API Key" : "Hiện API Key"} aria-pressed={showApiKey}>{showApiKey ? "Ẩn" : "Hiện"}</Button>
+          </div>
+          <p id="gemini-key-help" className="mt-2 text-xs text-slate-500">Ưu tiên khóa bạn nhập. Để trống để dùng cấu hình máy chủ. Khóa chỉ giữ tạm khi mở màn hình này, không lưu vào bài tập.</p>
+        </div>
         <div className="form-grid three"><Field label="Cấp học"><NativeSelect className="w-full" value={educationLevel} onChange={(e) => { const value = e.target.value; setEducationLevel(value); setGrade(grades[value][0]); }}><NativeSelectOption>Tiểu học</NativeSelectOption><NativeSelectOption>THCS</NativeSelectOption><NativeSelectOption>THPT</NativeSelectOption></NativeSelect></Field><Field label="Lớp"><NativeSelect className="w-full" value={grade} onChange={(e) => setGrade(e.target.value)}>{grades[educationLevel].map((item) => <NativeSelectOption key={item}>{item}</NativeSelectOption>)}</NativeSelect></Field><Field label="Môn học"><NativeSelect className="w-full" value={subject} onChange={(e) => setSubject(e.target.value)}>{subjects.map((item) => <NativeSelectOption key={item}>{item}</NativeSelectOption>)}</NativeSelect></Field></div>
         <div className="form-grid two"><Field label="Số lượng câu hỏi"><NativeSelect className="w-full" value={questionCount} onChange={(e) => setQuestionCount(Number(e.target.value))}>{[5, 10, 15, 20].map((n) => <NativeSelectOption key={n} value={n}>{n} câu</NativeSelectOption>)}</NativeSelect></Field><Field label="Số đáp án"><NativeSelect className="w-full" value={answerCount} onChange={(e) => setAnswerCount(Number(e.target.value))}>{[2, 3, 4, 5, 6].map((n) => <NativeSelectOption key={n} value={n}>{n} đáp án</NativeSelectOption>)}</NativeSelect></Field></div>
         <div className="form-grid two"><Field label="Hạn nộp" optional><div className="icon-input"><CalendarClock /><Input type="datetime-local" value={deadline} min={localDateTimeValue()} onChange={(e) => setDeadline(e.target.value)} /></div></Field><Field label="Thời gian làm bài"><div className="icon-input"><Timer /><NativeSelect className="w-full" value={timeLimitMinutes} onChange={(e) => setTimeLimitMinutes(Number(e.target.value))}>{[10, 15, 20, 30, 45, 60, 90, 120].map((minutes) => <NativeSelectOption key={minutes} value={minutes}>{minutes} phút</NativeSelectOption>)}</NativeSelect></div></Field></div>
