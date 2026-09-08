@@ -13,7 +13,7 @@ test("defines the EduQuiz application shell and primary journeys", async () => {
 
   assert.match(layout, /EduQuiz AI — Tạo đề và giao bài trực tuyến/);
   assert.match(page, /Không gian giáo viên/);
-  assert.match(page, /Tạo Quiz Ngay/);
+  assert.match(page, /Tạo câu hỏi bằng AI/);
   assert.match(page, /overview-strip/);
   assert.match(page, /login-showcase/);
 });
