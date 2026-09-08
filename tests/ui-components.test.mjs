@@ -50,7 +50,7 @@ test("emits the product theme and responsive layout", async () => {
   assert.match(css, /--indigo:/);
   assert.match(css, /\.builder-grid/);
   assert.match(css, /@media\s*\((?:max-width:\s*800px|width<=800px)\)/);
-  assert.match(css, /\.app-shell\s*\{[^}]*grid-template-columns:\s*248px/s);
+  assert.match(css, /\.app-shell\s*\{[^}]*display:block/s);
   assert.match(css, /\.login-showcase/);
   assert.match(css, /\.overview-strip/);
 });
