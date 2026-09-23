@@ -74,7 +74,8 @@ export async function POST(request: Request) {
     }
     const questions = JSON.parse(quiz.questionsJson) as Question[];
     const answerKey = Object.fromEntries(questions.map((question) => [question.id, question.correctOptionId]));
-    if (alreadySaved) return Response.json({ submission: { ...mapSubmission(alreadySaved), answerKey } });
+    const explanations = Object.fromEntries(questions.map((question) => [question.id, question.explanation || ""]));
+    if (alreadySaved) return Response.json({ submission: { ...mapSubmission(alreadySaved), answerKey, explanations } });
 
     // A retry may recover a previously saved result after the deadline, but
     // new submissions still must arrive before it.
@@ -130,7 +131,7 @@ export async function POST(request: Request) {
     if (saved.quizId !== quiz.id || saved.classId !== classroom.id || saved.studentCode !== student.code) {
       return Response.json({ error: "Mã bài nộp đã được sử dụng." }, { status: 409 });
     }
-    if (!inserted.length) return Response.json({ submission: { ...mapSubmission(saved), answerKey } });
+    if (!inserted.length) return Response.json({ submission: { ...mapSubmission(saved), answerKey, explanations } });
     const attemptNumber = saved.attemptNumber;
 
     const message = [
@@ -139,7 +140,7 @@ export async function POST(request: Request) {
       `Lượt làm: ${attemptNumber}/${maxAttempts}.`,
     ].join("\n");
     const notifications = await notifyStudent(student, `Kết quả EduQuiz: ${quiz.title}`, message);
-    return Response.json({ submission: { ...mapSubmission(saved), answerKey, notifications } }, { status: 201 });
+    return Response.json({ submission: { ...mapSubmission(saved), answerKey, explanations, notifications } }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Không thể nộp bài." }, { status: 500 });
   }

@@ -139,12 +139,15 @@ export function buildQuestions(input: { topic: string; sourceText: string; count
     const answers = [...baseAnswers];
     while (answers.length < input.answerCount) answers.push(`Phương án ${letters[answers.length]}`);
     const options = answers.slice(0, input.answerCount).map((text, i) => ({ id: letters[i], text }));
+    const correctOptionId = options[Math.min(correct, options.length - 1)].id;
+    const correctText = options[Math.min(correct, options.length - 1)].text;
     return {
       id: `q-${crypto.randomUUID()}`,
       prompt,
       level: bloom[index % bloom.length] || defaultLevel,
       options,
-      correctOptionId: options[Math.min(correct, options.length - 1)].id,
+      correctOptionId,
+      explanation: `Phương án ${correctOptionId} ("${correctText}") là đáp án đúng theo kiến thức chuẩn của bài học.`,
     };
   });
 }

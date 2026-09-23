@@ -8,6 +8,7 @@ export type Question = {
   level: BloomLevel;
   options: QuizOption[];
   correctOptionId: string;
+  explanation?: string;
 };
 
 export type Student = {
@@ -35,7 +36,7 @@ export type Quiz = {
   createdAt: string;
 };
 
-export type StudentQuestion = Omit<Question, "correctOptionId">;
+export type StudentQuestion = Omit<Question, "correctOptionId" | "explanation">;
 export type StudentQuiz = Omit<Quiz, "questions"> & { questions: StudentQuestion[] };
 
 export type Classroom = {
@@ -60,6 +61,8 @@ export type Submission = {
   attemptNumber: number;
   answers: Record<string, string>;
   answerKey?: Record<string, string>;
+  explanations?: Record<string, string>;
   createdAt: string;
   notifications?: { email: boolean; zalo: boolean };
 };
+

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "katex/dist/katex.min.css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 
 :root {
@@ -12,6 +13,75 @@
   --ink: #12213f; --subtle: #64748b; --indigo: #2563eb; --violet: #6558d9; --mint: #0f9f75;
   --rose: #dc3158; --amber: #d98d0b; --blue: #2563eb; --surface: #ffffff; --lavender: #f4f7fb;
   --navy: #0b1e3b; --navy-soft: #132b51;
+}
+
+.dark {
+  --background: #0b1120; --foreground: #f1f5f9; --card: #131c31; --card-foreground: #f1f5f9;
+  --popover: #131c31; --popover-foreground: #f1f5f9; --primary: #3b82f6; --primary-foreground: #ffffff;
+  --secondary: #1e293b; --secondary-foreground: #93c5fd; --muted: #1e293b; --muted-foreground: #94a3b8;
+  --accent: #1e293b; --accent-foreground: #93c5fd; --destructive: #ef4444; --border: #243049;
+  --input: #243049; --ring: #3b82f6; --chart-1: #3b82f6; --chart-2: #10b981; --chart-3: #f59e0b;
+  --chart-4: #ef4444; --chart-5: #8b5cf6; --radius: .875rem;
+  --ink: #f1f5f9; --subtle: #94a3b8; --indigo: #60a5fa; --violet: #a78bfa; --mint: #34d399;
+  --rose: #f87171; --amber: #fbbf24; --blue: #60a5fa; --surface: #131c31; --lavender: #0b1120;
+  --navy: #070d18; --navy-soft: #0e1726;
+}
+
+.dark .app-shell { background: radial-gradient(circle at 80% 3%, #172554 0, transparent 26rem), linear-gradient(180deg, #0b1120 0, #0f172a 100%); }
+.dark .topbar { background: rgba(19, 28, 49, .92); border-bottom: 1px solid #243049; box-shadow: 0 4px 24px rgba(0,0,0,.35); }
+.dark .config-card, .dark .workspace-card, .dark .teacher-card, .dark .quiz-card, .dark .stats-card, .dark .chart-card { background: rgba(19, 28, 49, .96); border-color: #243049; }
+.dark .brand { color: #f1f5f9; }
+.dark .primary-nav button { color: #94a3b8; }
+.dark .primary-nav button:hover { background: #1e293b; color: #93c5fd; }
+.dark .primary-nav button.active { color: #93c5fd; background: #1e293b; box-shadow: inset 0 0 0 1px #3b82f6; }
+.dark .page-heading h1 { color: #f1f5f9; }
+.dark .section-title h2, .dark .workspace-header h2 { color: #f1f5f9; }
+.dark .field-label { color: #cbd5e1; }
+.dark .field-block input, .dark .field-block textarea, .dark .field-block select { background: #1e293b; border-color: #334155; color: #f1f5f9; }
+.dark .bloom-list label { background: #1e293b; border-color: #334155; color: #cbd5e1; }
+.dark .segmented { background: #1e293b; }
+.dark .segmented button { color: #94a3b8; }
+.dark .segmented button.active { background: #0f172a; color: #93c5fd; }
+.dark .dropzone { background: #0f172a; border-color: #334155; color: #94a3b8; }
+.dark .student-page { background: #0b1120; }
+.dark .student-topbar { background: rgba(19, 28, 49, .92); border-bottom: 1px solid #243049; }
+.dark .student-brand strong { color: #f1f5f9; }
+.dark .identity-card, .dark .question-card, .dark .result-card { background: #131c31; border-color: #243049; }
+.dark .option-label { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+.dark .option-label:hover { background: #26354a; border-color: #475569; }
+.dark .explanation-box { background: #172554; border-color: #1e40af; color: #bfdbfe; }
+.dark .chart-container { background: #131c31; border-color: #243049; }
+
+.explanation-box {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #f0f7ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1e40af;
+}
+.explanation-box strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #1d4ed8;
+}
+.katex-display-wrapper { overflow-x: auto; max-width: 100%; padding: 4px 0; }
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  transition: all 0.2s;
+}
+.theme-toggle-btn:hover {
+  background: var(--accent);
 }
 
 @theme inline {

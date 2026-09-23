@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Toaster } from "@/components/ui/sonner";
+import { MathText } from "@/components/ui/math-text";
+import { ThemeToggle } from "@/components/theme-toggle";
 import type { StudentQuiz, Submission } from "@/components/eduquiz/types";
 
 type Identity = {
@@ -152,9 +154,18 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
   if (!quiz) return <main className="student-loading error"><span><XCircle /></span><h1>Không tìm thấy bài tập</h1><p>Đường dẫn có thể đã hết hiệu lực hoặc chưa được phát hành.</p></main>;
 
   return <div className="student-page">
-    <header className="student-topbar"><Link href="/" className="student-brand"><span><BrainCircuit /></span><div><strong>EDUQUIZ · LÀM BÀI ÔN TẬP</strong><small>Xác minh bằng mã học sinh</small></div></Link><div className={`timer ${timeLimitSeconds && remainingSeconds < 60 ? "urgent" : ""}`}><Clock3 /> {formatDuration(remainingSeconds)}</div></header>
+    <header className="student-topbar">
+      <Link href="/" className="student-brand">
+        <span><BrainCircuit /></span>
+        <div><strong>EDUQUIZ · LÀM BÀI ÔN TẬP</strong><small>Xác minh bằng mã học sinh</small></div>
+      </Link>
+      <div className="flex items-center gap-3">
+        <ThemeToggle />
+        <div className={`timer ${timeLimitSeconds && remainingSeconds < 60 ? "urgent" : ""}`}><Clock3 /> {formatDuration(remainingSeconds)}</div>
+      </div>
+    </header>
     <main className="student-container">
-      <section className="quiz-banner"><div><span>{quiz.subject} · {quiz.grade}</span><b>{quiz.questions.length} câu hỏi</b><b>Tối đa {quiz.maxAttempts} lượt</b></div><h1>{quiz.title}</h1><p>Hạn nộp: {formatDeadline(quiz.deadline)} · Thời gian: {quiz.timeLimitMinutes ? `${quiz.timeLimitMinutes} phút` : "Không giới hạn"}</p><BrainCircuit /></section>
+      <section className="quiz-banner"><div><span>{quiz.subject} · {quiz.grade}</span><b>{quiz.questions.length} câu hỏi</b><b>Tối đa {quiz.maxAttempts} lượt</b></div><h1><MathText content={quiz.title} /></h1><p>Hạn nộp: {formatDeadline(quiz.deadline)} · Thời gian: {quiz.timeLimitMinutes ? `${quiz.timeLimitMinutes} phút` : "Không giới hạn"}</p><BrainCircuit /></section>
 
       {!identity && <section className="identity-card"><div className="identity-title"><span><KeyRound /></span><div><h2>Xác minh học sinh</h2><p>Nhập đúng mã lớp và mã học sinh do giáo viên cung cấp.</p></div></div><div className="student-info"><label>Mã lớp <b>*</b><Input value={classCode} onChange={(event) => setClassCode(event.target.value.toUpperCase())} placeholder="Ví dụ: 7A" autoComplete="off" /></label><label>Mã học sinh <b>*</b><Input value={studentCode} onChange={(event) => setStudentCode(event.target.value.toUpperCase())} placeholder="Ví dụ: HS001" autoComplete="off" /></label></div><Button onClick={verifyIdentity} disabled={verifying || expired}><UserCheck /> {expired ? "Bài tập đã quá hạn" : verifying ? "Đang xác minh..." : "Xác minh và bắt đầu làm"}</Button></section>}
 
@@ -168,14 +179,21 @@ export default function StudentQuizPage({ params }: { params: Promise<{ id: stri
         const selected = answers[question.id];
         const correctOptionId = result?.answerKey?.[question.id];
         const isCorrect = result && selected === correctOptionId;
+        const explanation = result?.explanations?.[question.id];
         return <article key={question.id} className={`student-question ${result ? isCorrect ? "review-correct" : "review-wrong" : ""}`}>
           <div className="student-question-meta"><div><span>Câu {index + 1}</span><small>{question.level}</small></div>{result && (isCorrect ? <b className="correct-label"><CheckCircle2 /> Đúng</b> : <b className="wrong-label"><XCircle /> Chưa đúng</b>)}</div>
-          <h2>{question.prompt}</h2>
+          <h2><MathText content={question.prompt} /></h2>
           <div className="student-options">{question.options.map((option) => {
             const chosen = selected === option.id;
             const correct = result && option.id === correctOptionId;
-            return <button type="button" key={option.id} disabled={!!result || submitting || (timeLimitSeconds > 0 && seconds >= timeLimitSeconds)} aria-pressed={chosen} className={`${chosen ? "chosen" : ""} ${correct ? "answer-correct" : ""} ${result && chosen && !correct ? "answer-wrong" : ""}`} onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))}><b>{option.id}</b><span>{option.text}</span>{correct && <CheckCircle2 />}</button>;
+            return <button type="button" key={option.id} disabled={!!result || submitting || (timeLimitSeconds > 0 && seconds >= timeLimitSeconds)} aria-pressed={chosen} className={`${chosen ? "chosen" : ""} ${correct ? "answer-correct" : ""} ${result && chosen && !correct ? "answer-wrong" : ""}`} onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))}><b>{option.id}</b><span><MathText content={option.text} /></span>{correct && <CheckCircle2 />}</button>;
           })}</div>
+          {result && explanation && (
+            <div className="explanation-box">
+              <strong>💡 Hướng dẫn giải chi tiết:</strong>
+              <MathText content={explanation} />
+            </div>
+          )}
         </article>;
       })}</section>}
       {identity && !result && <div className="submit-bar"><div><span>Bạn đã trả lời</span><strong>{answeredCount}/{quiz.questions.length} câu</strong></div><Button onClick={() => void submit(false)} disabled={submitting}><Send /> {submitting ? "Đang nộp bài..." : "Nộp bài"}</Button></div>}

@@ -38,12 +38,16 @@ function normalizeQuestions(value: unknown, count: number, answerCount: number, 
       : bloom[index % bloom.length];
     const correctOptionId = String(row.correctOptionId || "").trim().toUpperCase();
     if (!letters.slice(0, answerCount).includes(correctOptionId)) throw new Error("AI không cung cấp đáp án đúng hợp lệ. Vui lòng tạo lại.");
+    const explanation = typeof (raw as { explanation?: unknown }).explanation === "string"
+      ? String((raw as { explanation?: unknown }).explanation).trim()
+      : undefined;
     return {
       id: `q-${crypto.randomUUID()}`,
       prompt: String(row.prompt || `Câu hỏi ${index + 1}`).trim(),
       level,
       options: optionTexts.map((text, optionIndex) => ({ id: letters[optionIndex], text })),
       correctOptionId,
+      explanation,
     };
   }).filter((question) => question.prompt.length > 3);
 }
@@ -106,7 +110,7 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
     `Mỗi câu có đúng ${answerCount} phương án A, B, C...; phân bổ theo Bloom: ${bloom.join(", ")}.`,
     body.sourceText?.trim() ? `=== TÀI LIỆU NGUỒN ===\n${body.sourceText.slice(0, 100000)}\n=== HẾT TÀI LIỆU ===` : "",
     allSourceFiles.length ? `Tệp đính kèm: ${allSourceFiles.map((file) => file.name).join(", ")}.` : "",
-    'Chỉ trả về JSON: {"questions":[{"prompt":"...","level":"Nhận biết","options":["...","..."],"correctOptionId":"A"}]}',
+    'Chỉ trả về JSON: {"questions":[{"prompt":"...","level":"Nhận biết","options":["...","..."],"correctOptionId":"A","explanation":"Lời giải chi tiết ngắn gọn vì sao đáp án này đúng"}]}',
   ].filter(Boolean).join("\n\n");
   const parts: Array<Record<string, unknown>> = [{ text: userPrompt }];
 
@@ -149,6 +153,7 @@ async function generateWithGemini(body: GenerateBody, count: number, answerCount
             level: { type: "string", enum: bloom },
             options: { type: "array", minItems: answerCount, maxItems: answerCount, items: { type: "string" } },
             correctOptionId: { type: "string", enum: letters.slice(0, answerCount) },
+            explanation: { type: "string" },
           },
           required: ["prompt", "level", "options", "correctOptionId"],
         },
