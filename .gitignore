@@ -12,3 +12,4 @@ dist/
 .vercel/
 .openai/hosting.json
 *.tgz
+KHBD_PRO/
